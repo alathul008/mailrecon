@@ -4,6 +4,8 @@ export const API = (
   import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
 ).replace(/\/$/, '');
 
+const API_KEY_STORAGE = 'mailrecon_api_key';
+
 export type GraphNode = {
   id: string;
   type: string;
@@ -21,18 +23,34 @@ export type GraphData = {
   edges: GraphEdge[];
 };
 
+export function getApiKey() {
+  return window.localStorage.getItem(API_KEY_STORAGE) || '';
+}
+
+export function setApiKey(key: string) {
+  const normalized = key.trim();
+  if (normalized) window.localStorage.setItem(API_KEY_STORAGE, normalized);
+  else window.localStorage.removeItem(API_KEY_STORAGE);
+}
+
+export function clearApiKey() {
+  window.localStorage.removeItem(API_KEY_STORAGE);
+}
+
 async function request<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 30000);
+  const apiKey = getApiKey();
 
   try {
     const r = await fetch(`${API}${path}`, {
       ...init,
       signal: controller.signal,
       headers: {
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         ...(init?.body ? { 'content-type': 'application/json' } : {}),
         ...(init?.headers || {}),
       },
@@ -46,6 +64,11 @@ async function request<T>(
         message = body.detail || body.message || message;
       } catch {
         // Response body may not contain valid JSON.
+      }
+
+      if (r.status === 401) {
+        clearApiKey();
+        window.dispatchEvent(new CustomEvent('mailrecon:auth-required'));
       }
 
       throw new Error(message);
@@ -63,6 +86,38 @@ async function request<T>(
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+export async function downloadReport(id: number, format: string) {
+  const apiKey = getApiKey();
+  const response = await fetch(reportUrl(id, format), {
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearApiKey();
+      window.dispatchEvent(new CustomEvent('mailrecon:auth-required'));
+    }
+    let message = `Request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      message = body.detail || body.message || message;
+    } catch {
+      // Response body may not contain valid JSON.
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `mailrecon-${id}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function createInvestigation(
