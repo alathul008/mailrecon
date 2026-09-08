@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     enable_ollama: bool = False
     privacy_mode: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    api_key: str | None = None
     max_concurrency: int = 8
     request_timeout_seconds: float = 10.0
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
