@@ -8,10 +8,13 @@ import {
   type Node,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { getGraph } from '../services/api';
+import { getGraph, type GraphData } from '../services/api';
 
 export function Graph({ id }: { id: number }) {
-  const [g, setG] = useState<any>({ nodes: [], edges: [] });
+  const [g, setG] = useState<GraphData>({
+    nodes: [],
+    edges: [],
+  });
 
   useEffect(() => {
     getGraph(id).then(setG);
@@ -19,7 +22,7 @@ export function Graph({ id }: { id: number }) {
 
   const nodes: Node[] = useMemo(
     () =>
-      g.nodes.map((n: any, i: number) => ({
+      g.nodes.map((n, i) => ({
         id: n.id,
         position: {
           x: (i % 3) * 240,
@@ -43,7 +46,7 @@ export function Graph({ id }: { id: number }) {
 
   const edges: Edge[] = useMemo(
     () =>
-      g.edges.map((e: any, i: number) => ({
+      g.edges.map((e, i) => ({
         id: `e${i}`,
         source: e.source,
         target: e.target,
