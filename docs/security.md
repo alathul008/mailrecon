@@ -2,6 +2,20 @@
 
 MailRecon is designed as a local-first defensive OSINT application.
 
+## API authentication
+
+Protected API endpoints require a bearer API key configured with `MAILRECON_API_KEY`. `/api/health` remains unauthenticated so container and deployment health checks can probe the service.
+
+Generate a strong random key locally, for example:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Put the generated value in `.env` as `MAILRECON_API_KEY=...`. Never commit the `.env` file or expose the key in source control.
+
+The browser UI prompts for the key and stores it in browser local storage. This is appropriate for the intended single-user/local deployment, but the key is not a browser secret: anyone who can execute JavaScript in the application origin can potentially access it. Do not treat this mechanism as multi-user authentication or as protection for a publicly hosted instance.
+
 ## SSRF controls
 
 Generic outbound URL validation:
@@ -23,7 +37,9 @@ Provider-specific clients should use fixed provider endpoints rather than accept
 - restrictive `Referrer-Policy`;
 - `Permissions-Policy` disabling unnecessary browser capabilities;
 - CSP with `frame-ancestors 'none'`;
-- 1 MiB request-body guard.
+- 1 MiB request-body guard;
+- bearer authentication on investigation/provider/report API endpoints;
+- Docker publishes port 8000 on localhost by default.
 
 ## Privacy
 

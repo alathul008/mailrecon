@@ -8,13 +8,14 @@ from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.schemas.schemas import InvestigationCreate
 from app.services.orchestrator import run_investigation, MODULES
 from app.reports.render import pdf_report
+from app.core.auth import require_api_key
 
 router=APIRouter(prefix="/api")
 
 @router.get("/health")
 def health(): return {"status":"ok","service":"MailRecon"}
 
-@router.get("/providers")
+@router.get("/providers", dependencies=[Depends(require_api_key)])
 def providers():
     from app.core.config import get_settings
     s=get_settings()
@@ -27,15 +28,14 @@ def providers():
         {"name":"Ollama","status":"configured" if s.enable_ollama else "disabled","configuration":"optional local model"},
     ]
 
-@router.post("/investigations")
+@router.post("/investigations", dependencies=[Depends(require_api_key)])
 async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
     inv=Investigation(target=str(payload.email),normalized_email=str(payload.email),username=str(payload.email).split("@",1)[0],domain=str(payload.email).split("@",1)[1].lower(),privacy_mode=payload.privacy_mode,status="queued")
     db.add(inv); db.commit(); db.refresh(inv)
     for m in MODULES: db.add(ModuleRun(investigation_id=inv.id,module=m,status="queued"))
     db.commit(); asyncio.create_task(run_investigation(inv.id)); return {"id":inv.id,"status":"queued"}
 
-
-@router.post("/demo")
+@router.post("/demo", dependencies=[Depends(require_api_key)])
 def demo(db: Session=Depends(get_db)):
     inv=Investigation(target="alex.morgan@fictional.test",normalized_email="alex.morgan@fictional.test",username="alex.morgan",domain="fictional.test",status="completed",risk_score=42,risk_level="MEDIUM",privacy_mode=False)
     db.add(inv); db.commit(); db.refresh(inv)
@@ -50,7 +50,7 @@ def demo(db: Session=Depends(get_db)):
     for m in MODULES: db.add(ModuleRun(investigation_id=inv.id,module=m,status="completed",message="Demo dataset"))
     e=GraphNode(investigation_id=inv.id,node_key="email:alex.morgan@fictional.test",node_type="EMAIL",label="alex.morgan@fictional.test"); d=GraphNode(investigation_id=inv.id,node_key="domain:fictional.test",node_type="DOMAIN",label="fictional.test"); p=GraphNode(investigation_id=inv.id,node_key="profile:https://github.com/alex-morgan-demo",node_type="PROFILE",label="github.com/alex-morgan-demo"); db.add_all([e,d,p]); db.flush(); db.add_all([GraphEdge(investigation_id=inv.id,source=e.node_key,target=d.node_key,relation="uses",confidence=1),GraphEdge(investigation_id=inv.id,source=e.node_key,target=p.node_key,relation="possible_profile",confidence=.72)]); db.commit(); return {"id":inv.id,"status":"completed","demo":True}
 
-@router.get("/investigations")
+@router.get("/investigations", dependencies=[Depends(require_api_key)])
 def list_investigations(db: Session=Depends(get_db)):
     q=db.execute(select(Investigation).order_by(Investigation.created_at.desc()).limit(50)); return [{"id":x.id,"target":x.target,"status":x.status,"risk_score":x.risk_score,"risk_level":x.risk_level,"created_at":x.created_at} for x in q.scalars()]
 
@@ -60,15 +60,15 @@ def load(inv_id,db):
     fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id).order_by(Finding.collected_at.desc())); findings=fq.scalars().all()
     mq=db.execute(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)); mods=mq.scalars().all(); return inv,findings,mods
 
-@router.get("/investigations/{inv_id}")
+@router.get("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
 def get_inv(inv_id:int,db:Session=Depends(get_db)):
     inv,findings,mods=load(inv_id,db); return {"id":inv.id,"target":inv.target,"username":inv.username,"domain":inv.domain,"status":inv.status,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"created_at":inv.created_at,"completed_at":inv.completed_at,"modules":[{"module":m.module,"status":m.status,"message":m.message} for m in mods],"findings":[{"id":f.id,"source":f.source,"source_url":f.source_url,"finding_type":f.finding_type,"value":f.value,"confidence":f.confidence,"severity":f.severity,"first_seen":f.first_seen,"last_seen":f.last_seen,"collected_at":f.collected_at,"notes":f.notes} for f in findings]}
 
-@router.get("/investigations/{inv_id}/findings")
+@router.get("/investigations/{inv_id}/findings", dependencies=[Depends(require_api_key)])
 def findings(inv_id:int,db:Session=Depends(get_db)):
     _,fs,_=load(inv_id,db); return [{"id":f.id,"source":f.source,"source_url":f.source_url,"finding_type":f.finding_type,"value":f.value,"confidence":f.confidence,"severity":f.severity,"collected_at":f.collected_at,"notes":f.notes} for f in fs]
 
-@router.get("/investigations/{inv_id}/risk")
+@router.get("/investigations/{inv_id}/risk", dependencies=[Depends(require_api_key)])
 def risk(inv_id:int,db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db)
     dimensions={}
@@ -86,7 +86,7 @@ def risk(inv_id:int,db:Session=Depends(get_db)):
             factors.append({"reason":f.value,"delta":delta,"notes":f.notes})
     return {"score":inv.risk_score,"level":inv.risk_level,"dimensions":dimensions,"factors":factors}
 
-@router.get("/investigations/{inv_id}/timeline")
+@router.get("/investigations/{inv_id}/timeline", dependencies=[Depends(require_api_key)])
 def timeline(inv_id:int,db:Session=Depends(get_db)):
     _,fs,mods=load(inv_id,db)
     events=[]
@@ -98,11 +98,11 @@ def timeline(inv_id:int,db:Session=Depends(get_db)):
     events.sort(key=lambda x:x["timestamp"],reverse=True)
     return events[:500]
 
-@router.get("/investigations/{inv_id}/graph")
+@router.get("/investigations/{inv_id}/graph", dependencies=[Depends(require_api_key)])
 def graph(inv_id:int,db:Session=Depends(get_db)):
     load(inv_id,db); nq=db.execute(select(GraphNode).where(GraphNode.investigation_id==inv_id)); eq=db.execute(select(GraphEdge).where(GraphEdge.investigation_id==inv_id)); return {"nodes":[{"id":n.node_key,"type":n.node_type,"label":n.label,"metadata":n.node_metadata} for n in nq.scalars()],"edges":[{"source":e.source,"target":e.target,"relation":e.relation,"confidence":e.confidence} for e in eq.scalars()]}
 
-@router.get("/investigations/{inv_id}/report")
+@router.get("/investigations/{inv_id}/report", dependencies=[Depends(require_api_key)])
 def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor")); factors=[{"delta":int((f.notes or "").replace("Score delta: ","").strip() or 0),"reason":f.value} for f in fq.scalars()]
     if format=="json": return {"target":inv.target,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"findings":[{"source":f.source,"type":f.finding_type,"value":f.value,"confidence":f.confidence,"severity":f.severity,"source_url":f.source_url,"notes":f.notes} for f in fs],"risk_factors":factors}
@@ -114,6 +114,6 @@ def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
         buf=pdf_report(inv,fs,factors); return Response(buf.read(),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.pdf"'})
     raise HTTPException(400,"Unsupported format")
 
-@router.delete("/investigations/{inv_id}")
+@router.delete("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
 def delete_inv(inv_id:int,db:Session=Depends(get_db)):
     load(inv_id,db); db.execute(delete(Investigation).where(Investigation.id==inv_id)); db.commit(); return {"deleted":True}
