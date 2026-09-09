@@ -125,10 +125,11 @@ export async function downloadReport(id: number, format: string) {
 export function createInvestigation(
   email: string,
   privacy_mode = false,
+  external_provider_disclosure = true,
 ) {
   return request<{ id: number; status: string }>('/investigations', {
     method: 'POST',
-    body: JSON.stringify({ email, privacy_mode }),
+    body: JSON.stringify({ email, privacy_mode, external_provider_disclosure }),
   });
 }
 
