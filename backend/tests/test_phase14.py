@@ -38,12 +38,12 @@ def test_phase14_migration_refuses_cross_investigation_attempt_reference(tmp_pat
     engine = create_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
         conn.execute(text(
-            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, created_at, execution_id) "
-            "VALUES ('one@example.com', 'one@example.com', 'one', 'example.com', 'queued', 0, CURRENT_TIMESTAMP, 'exec-one')"
+            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id) "
+            "VALUES ('one@example.com', 'one@example.com', 'one', 'example.com', 'queued', 0, 1, CURRENT_TIMESTAMP, 'exec-one')"
         ))
         conn.execute(text(
-            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, created_at, execution_id) "
-            "VALUES ('two@example.com', 'two@example.com', 'two', 'example.com', 'queued', 0, CURRENT_TIMESTAMP, 'exec-two')"
+            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id) "
+            "VALUES ('two@example.com', 'two@example.com', 'two', 'example.com', 'queued', 0, 1, CURRENT_TIMESTAMP, 'exec-two')"
         ))
         inv_one = conn.execute(text("SELECT id FROM investigations WHERE execution_id='exec-one'")).scalar_one()
         inv_two = conn.execute(text("SELECT id FROM investigations WHERE execution_id='exec-two'")).scalar_one()
