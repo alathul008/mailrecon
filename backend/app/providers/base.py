@@ -17,5 +17,25 @@ class ProviderResult:
             raise ValueError(f"Unsupported provider status: {self.status}")
 
 
-def finding(source, finding_type, value, confidence=0.5, severity="info", source_url=None, notes=None, raw_reference=None, first_seen=None, last_seen=None):
-    return {"source": source, "source_url": source_url, "finding_type": finding_type, "value": value, "confidence": confidence, "severity": severity, "notes": notes, "raw_reference": raw_reference, "first_seen": first_seen, "last_seen": last_seen, "collected_at": datetime.now(timezone.utc)}
+def _evidence_state_from_notes(notes: str | None) -> str | None:
+    marker = "Evidence state: "
+    if marker not in (notes or ""):
+        return None
+    return notes.split(marker, 1)[1].split(".", 1)[0].strip() or None
+
+
+def finding(source, finding_type, value, confidence=0.5, severity="info", source_url=None, notes=None, raw_reference=None, first_seen=None, last_seen=None, evidence_state=None):
+    return {
+        "source": source,
+        "source_url": source_url,
+        "finding_type": finding_type,
+        "value": value,
+        "confidence": confidence,
+        "severity": severity,
+        "evidence_state": evidence_state or _evidence_state_from_notes(notes),
+        "notes": notes,
+        "raw_reference": raw_reference,
+        "first_seen": first_seen,
+        "last_seen": last_seen,
+        "collected_at": datetime.now(timezone.utc),
+    }
