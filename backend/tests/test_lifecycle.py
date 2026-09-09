@@ -2,13 +2,14 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, delete, event, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.db.session import Base, engine as app_engine
 from app.models import Finding, GraphEdge, GraphNode, Investigation, ModuleRun
 from app.services import lifecycle
+from app.services.orchestrator import mark_investigation_failed
 
 
 def make_engine(tmp_path):
@@ -43,7 +44,7 @@ def test_queued_running_completed_lifecycle(tmp_path):
         assert current.execution_token == token
         assert lifecycle.execution_is_owned(db, inv.id, token)
         db.execute(
-            __import__("sqlalchemy").update(Investigation)
+            update(Investigation)
             .where(Investigation.id == inv.id, Investigation.execution_token == token)
             .values(status="completed", completed_at=datetime.now(timezone.utc), execution_token=None, execution_heartbeat_at=None)
         )
@@ -59,7 +60,7 @@ def test_failed_investigation_is_terminal(tmp_path):
         token = lifecycle.claim_investigation(db, inv.id)
         assert token
         db.execute(
-            __import__("sqlalchemy").update(Investigation)
+            update(Investigation)
             .where(Investigation.id == inv.id, Investigation.execution_token == token)
             .values(status="failed", execution_token=None, execution_heartbeat_at=None)
         )
@@ -152,6 +153,7 @@ async def test_configured_concurrency_is_respected(tmp_path, monkeypatch):
 
 def test_delete_queued_investigation(tmp_path):
     db_engine = make_engine(tmp_path)
+    event.listen(db_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
     with Session(db_engine) as db:
         inv = add_investigation(db)
         db.add_all([
@@ -182,9 +184,7 @@ def test_worker_delete_race_is_fenced_by_execution_token(tmp_path):
         inv = add_investigation(db)
         token = lifecycle.claim_investigation(db, inv.id)
         assert token
-        db.execute(
-            __import__("sqlalchemy").delete(Investigation).where(Investigation.id == inv.id)
-        )
+        db.execute(delete(Investigation).where(Investigation.id == inv.id))
         db.commit()
         assert lifecycle.execution_is_owned(db, inv.id, token) is False
 
@@ -195,8 +195,9 @@ def test_sqlite_foreign_keys_are_enabled_for_application_engine():
 
 
 def test_delete_cascades_all_investigation_children(tmp_path):
-    db_engine = make_engine(tmp_path)
+    db_engine = create_engine(f"sqlite:///{tmp_path / 'cascade.db'}")
     event.listen(db_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
+    Base.metadata.create_all(db_engine)
     with Session(db_engine) as db:
         inv = add_investigation(db)
         db.add_all([
@@ -212,3 +213,20 @@ def test_delete_cascades_all_investigation_children(tmp_path):
         assert db.scalars(select(ModuleRun).where(ModuleRun.investigation_id == inv.id)).all() == []
         assert db.scalars(select(GraphNode).where(GraphNode.investigation_id == inv.id)).all() == []
         assert db.scalars(select(GraphEdge).where(GraphEdge.investigation_id == inv.id)).all() == []
+
+
+def test_completed_modules_remain_completed_after_later_failure(tmp_path):
+    db_engine = make_engine(tmp_path)
+    with Session(db_engine) as db:
+        inv = add_investigation(db)
+        token = lifecycle.claim_investigation(db, inv.id)
+        completed = ModuleRun(investigation_id=inv.id, module="email_validation", status="completed", message="Validated")
+        running = ModuleRun(investigation_id=inv.id, module="risk_calculation", status="running")
+        queued = ModuleRun(investigation_id=inv.id, module="graph_build", status="queued")
+        db.add_all([completed, running, queued])
+        db.commit()
+        assert mark_investigation_failed(db, inv.id, token, RuntimeError("late failure"))
+        assert db.get(ModuleRun, completed.id).status == "completed"
+        assert db.get(ModuleRun, running.id).status == "failed"
+        assert db.get(ModuleRun, queued.id).status == "skipped"
+        assert db.get(Investigation, inv.id).status == "failed"
