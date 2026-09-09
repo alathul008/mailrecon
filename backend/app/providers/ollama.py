@@ -43,7 +43,10 @@ class OllamaProvider:
                 "Do not infer identity, invent facts, expose credentials, or claim an account exists from ambiguous evidence. "
                 "State uncertainty. Target: "+target+"\nEvidence:\n"+str(compact))
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            # Ollama is governed by its explicit host allowlist. Do not inherit
+            # HTTP(S)_PROXY/NO_PROXY environment routing, which could otherwise
+            # redirect a request outside that configured network boundary.
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
                 r=await client.post(f"{base_url}/api/generate",json={"model":s.ollama_model,"prompt":prompt,"stream":False})
                 r.raise_for_status(); data=r.json(); return data.get("response")
         except Exception:
