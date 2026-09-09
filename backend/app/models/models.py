@@ -10,7 +10,7 @@ class Investigation(Base):
     __tablename__ = "investigations"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["investigation_id", "execution_attempt_id"],
+            ["id", "execution_attempt_id"],
             ["execution_attempts.investigation_id", "execution_attempts.execution_attempt_id"],
             name="fk_investigations_execution_attempt_investigation",
             ondelete="SET NULL",
