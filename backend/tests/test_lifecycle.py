@@ -96,6 +96,18 @@ def test_stale_running_work_is_requeued_deterministically(tmp_path):
         assert recovered.execution_heartbeat_at is None
 
 
+def test_legacy_running_work_without_heartbeat_is_recoverable(tmp_path):
+    db_engine = make_engine(tmp_path)
+    with Session(db_engine) as db:
+        inv = add_investigation(db, status="running")
+        inv.execution_token = None
+        inv.execution_started_at = None
+        inv.execution_heartbeat_at = None
+        db.commit()
+        assert lifecycle.recover_stale_investigations(db) == 1
+        assert db.get(Investigation, inv.id).status == "queued"
+
+
 def test_only_one_executor_can_claim(tmp_path):
     db_engine = make_engine(tmp_path)
     SessionLocal = sessionmaker(db_engine, expire_on_commit=False, class_=Session)
