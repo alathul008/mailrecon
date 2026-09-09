@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from urllib.parse import urlsplit
+
 import httpcore
 import httpx
-from urllib.parse import urlsplit
 
 from app.core.security import validate_external_url
 
@@ -25,19 +26,17 @@ class PinnedAsyncHTTPTransport(httpx.AsyncHTTPTransport):
     def __init__(self, hostname: str, address: str, **kwargs):
         self._pinned_backend = _PinnedBackend(hostname, address)
         super().__init__(**kwargs)
-        # HTTPX currently does not expose httpcore's network_backend publicly.
-        # Keep the pin at the connection layer so DNS cannot be re-resolved
-        # between validation and TCP connection establishment.
         self._pool._network_backend = self._pinned_backend
 
 
 def _resolve_and_validate(url: str) -> tuple[str, str]:
     validate_external_url(url)
-    host = urlsplit(url).hostname
+    parsed = urlsplit(url)
+    host = parsed.hostname
     if not host:
         raise ValueError("Outbound URL has no hostname")
     try:
-        addresses = {ai[4][0] for ai in socket.getaddrinfo(host, urlsplit(url).port or 443, type=socket.SOCK_STREAM)}
+        addresses = {ai[4][0] for ai in socket.getaddrinfo(host, parsed.port or 443, type=socket.SOCK_STREAM)}
     except socket.gaierror as exc:
         raise ValueError("Hostname could not be resolved") from exc
     public = []
@@ -51,13 +50,6 @@ def _resolve_and_validate(url: str) -> tuple[str, str]:
     return host.rstrip(".").lower(), sorted(public)[0]
 
 
-def public_provider_client(url: str, *, timeout: float, headers=None) -> httpx.AsyncClient:
+def pinned_transport(url: str) -> PinnedAsyncHTTPTransport:
     hostname, address = _resolve_and_validate(url)
-    transport = PinnedAsyncHTTPTransport(hostname, address, retries=0)
-    return httpx.AsyncClient(
-        timeout=timeout,
-        headers=headers,
-        follow_redirects=False,
-        trust_env=False,
-        transport=transport,
-    )
+    return PinnedAsyncHTTPTransport(hostname, address, retries=0)
