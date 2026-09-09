@@ -10,10 +10,16 @@ MailRecon separates **persistence privacy** from **external-provider disclosure*
 
 Each investigation has an explicit `external_provider_disclosure` setting.
 
-- `true` (default): the approved public providers may receive the investigation target for their normal OSINT queries.
-- `false`: public external providers are not queried. They return an explicit `disabled` provider status so the result is visible and is not mistaken for a negative finding.
+- `false` (default): public external providers are not queried. They return an explicit `disabled` provider status so the result is visible and is not mistaken for a negative finding.
+- `true`: the approved public providers may receive the investigation target for their normal OSINT queries. This is an explicit per-investigation opt-in.
+
+Existing persisted investigations retain their stored disclosure setting. Changing the default for new investigations does not rewrite historical records or silently revoke/enable provider disclosure for them.
 
 This setting does not silently change `privacy_mode` and does not weaken provider failure classification.
+
+## API clients
+
+API clients should set `external_provider_disclosure` explicitly when creating an investigation. Omitting it uses the secure default of `false`. Clients that require public-provider queries must explicitly send `true` for that investigation.
 
 ## Ollama
 
