@@ -84,9 +84,6 @@ def add_findings(db,inv_id,fs,token=None):
         if existing:
             inserted.add(key)
             continue
-        # Compatibility with findings created before Phase 7: they receive the
-        # execution_id during claim but have no persistence key. Match their
-        # semantic identity before inserting a new recovery result.
         legacy=db.scalar(select(Finding.id).where(
             Finding.investigation_id==inv_id,
             Finding.execution_id==inv.execution_id,
@@ -160,7 +157,9 @@ def mark_investigation_failed(db, inv_id, token, exc):
         return False
     inv.status="failed"; inv.completed_at=None; inv.execution_token=None; inv.execution_heartbeat_at=None
     db.commit()
-    for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.execution_id==inv.execution_id)).all():
+    for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)).all():
+        if m.execution_id is None:
+            m.execution_id=inv.execution_id
         if m.status == "running":
             m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
         elif m.status == "queued":
