@@ -3,7 +3,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, or_
 
 from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
@@ -49,13 +49,15 @@ def set_module(db,inv_id,name,status,message=None,token=None):
         _require_ownership(db,inv_id,token)
     inv=db.get(Investigation,inv_id)
     if not inv: return
-    if not inv.execution_id or not inv.execution_attempt_id:
-        raise RuntimeError("Investigation has no durable execution provenance")
+    if not inv.execution_id:
+        raise RuntimeError("Investigation has no durable logical execution identity")
+    if token is not None and not inv.execution_attempt_id:
+        raise RuntimeError("Investigation has no durable execution-attempt provenance")
     m=db.scalar(select(ModuleRun).where(
         ModuleRun.investigation_id==inv_id,
         ModuleRun.execution_attempt_id==inv.execution_attempt_id,
         ModuleRun.module==name,
-    ))
+    )) if inv.execution_attempt_id else None
     if not m:
         m=ModuleRun(
             investigation_id=inv_id,
@@ -76,8 +78,10 @@ def add_findings(db,inv_id,fs,token=None):
         _require_ownership(db,inv_id,token)
     inv=db.get(Investigation,inv_id)
     if not inv: return
-    if not inv.execution_id or not inv.execution_attempt_id:
-        raise RuntimeError("Investigation has no durable execution provenance")
+    if not inv.execution_id:
+        raise RuntimeError("Investigation has no durable logical execution identity")
+    if token is not None and not inv.execution_attempt_id:
+        raise RuntimeError("Investigation has no durable execution-attempt provenance")
     inserted=set()
     for f in fs:
         f=dict(f)
@@ -173,8 +177,14 @@ def mark_investigation_failed(db, inv_id, token, exc):
     db.commit()
     for m in db.scalars(select(ModuleRun).where(
         ModuleRun.investigation_id==inv_id,
-        ModuleRun.execution_attempt_id==inv.execution_attempt_id,
+        or_(
+            ModuleRun.execution_attempt_id==inv.execution_attempt_id,
+            ModuleRun.execution_attempt_id.is_(None),
+        ),
     )).all():
+        if m.execution_attempt_id is None:
+            m.execution_attempt_id=inv.execution_attempt_id
+            m.execution_id=inv.execution_id
         if m.status == "running":
             m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
         elif m.status == "queued":
