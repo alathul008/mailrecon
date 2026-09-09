@@ -75,7 +75,8 @@ def test_phase14_browser_key_lifecycle_uses_session_storage_only():
 def test_phase14_runtime_image_removes_installation_tooling():
     dockerfile = Path("Dockerfile").read_text()
     assert "pip uninstall -y pip setuptools" in dockerfile
-    assert "pip install --no-cache-dir -r requirements.txt" in dockerfile
+    assert "requirements.lock" in dockerfile
+    assert "pip install --no-cache-dir --requirement requirements.lock" in dockerfile
 
 
 def test_phase14_claim_guard_is_present():
