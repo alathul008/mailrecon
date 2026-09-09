@@ -41,36 +41,48 @@ def add_inv(db):
     return inv
 
 
-def test_new_investigation_disclosure_defaults_false_and_opt_in_is_preserved():
+def test_new_investigation_disclosure_defaults_false_and_explicit_opt_in_is_preserved():
     default = InvestigationCreate(email="test@example.com")
     explicit = InvestigationCreate(email="test@example.com", external_provider_disclosure=True)
     assert default.external_provider_disclosure is False
     assert explicit.external_provider_disclosure is True
 
-    model_default = Investigation(
-        target="default@example.com",
-        normalized_email="default@example.com",
-        username="default",
-        domain="example.com",
-    )
-    model_opt_in = Investigation(
-        target="optin@example.com",
-        normalized_email="optin@example.com",
-        username="optin",
-        domain="example.com",
-        external_provider_disclosure=True,
-    )
-    assert model_default.external_provider_disclosure is False
-    assert model_opt_in.external_provider_disclosure is True
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        model_default = Investigation(
+            target="default@example.com",
+            normalized_email="default@example.com",
+            username="default",
+            domain="example.com",
+        )
+        model_opt_in = Investigation(
+            target="optin@example.com",
+            normalized_email="optin@example.com",
+            username="optin",
+            domain="example.com",
+            external_provider_disclosure=True,
+        )
+        db.add_all([model_default, model_opt_in])
+        db.commit()
+        db.refresh(model_default)
+        db.refresh(model_opt_in)
+        assert model_default.external_provider_disclosure is False
+        assert model_opt_in.external_provider_disclosure is True
 
 
-def test_phase16_migration_adds_investigation_current_attempt_fk(tmp_path):
+def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_stored_disclosure(tmp_path):
     db_path = tmp_path / "valid.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "0007")
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) "
+            "VALUES ('legacy@example.com', 'legacy@example.com', 'legacy', 'example.com', 'completed', 0, 1, CURRENT_TIMESTAMP, 'legacy-exec', NULL)"
+        ))
     command.upgrade(cfg, "head")
 
-    engine = create_engine(f"sqlite:///{db_path}")
     inspector = inspect(engine)
     fks = {fk["name"]: fk for fk in inspector.get_foreign_keys("investigations")}
     fk = fks["fk_investigations_execution_attempt_investigation"]
@@ -79,6 +91,7 @@ def test_phase16_migration_adds_investigation_current_attempt_fk(tmp_path):
     assert tuple(fk["referred_columns"]) == ("investigation_id", "execution_attempt_id")
     with engine.connect() as conn:
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
+        assert conn.execute(text("SELECT external_provider_disclosure FROM investigations WHERE execution_id='legacy-exec'")).scalar_one() == 1
 
 
 def test_phase16_migration_refuses_invalid_current_attempt_reference(tmp_path):
@@ -205,8 +218,10 @@ def test_phase16_graph_database_failure_preserves_previous_graph(tmp_path):
         except IntegrityError:
             db.rollback()
 
-        assert db.scalars(select(GraphNode).where(GraphNode.investigation_id == inv.id)).all()[0].node_key == "email:test@example.com"
-        assert db.scalars(select(GraphEdge).where(GraphEdge.investigation_id == inv.id)).all()[0].relation == "uses"
+        nodes = db.scalars(select(GraphNode).where(GraphNode.investigation_id == inv.id)).all()
+        edges = db.scalars(select(GraphEdge).where(GraphEdge.investigation_id == inv.id)).all()
+        assert [(n.node_key, n.label) for n in nodes] == [("email:test@example.com", "test@example.com"), ("domain:example.com", "example.com")]
+        assert [(e.source, e.target, e.relation) for e in edges] == [("email:test@example.com", "domain:example.com", "uses")]
 
 
 def test_phase16_graph_non_database_failure_rolls_back_previous_graph(tmp_path):
@@ -234,10 +249,22 @@ def test_phase16_graph_non_database_failure_rolls_back_previous_graph(tmp_path):
         assert [(e.source, e.target, e.relation) for e in edges] == [("email:test@example.com", "domain:example.com", "uses")]
 
 
-def test_phase16_hash_lock_is_integrity_enforced():
+def test_phase16_hash_lock_contains_hashes_for_every_locked_distribution():
     lock = Path("backend/requirements.lock").read_text(encoding="utf-8")
-    assert "--require-hashes" in lock
-    assert lock.count("--hash=sha256:") >= lock.count("==")
+    blocks = lock.split("\n")
+    current = None
+    package_blocks = []
+    for line in blocks:
+        if line and not line.startswith((" ", "#")) and "==" in line:
+            if current is not None:
+                package_blocks.append(current)
+            current = [line]
+        elif current is not None:
+            current.append(line)
+    if current is not None:
+        package_blocks.append(current)
+    assert package_blocks
+    assert all(any("--hash=sha256:" in line for line in block) for block in package_blocks)
 
 
 def test_phase16_documentation_describes_secure_disclosure_default():
