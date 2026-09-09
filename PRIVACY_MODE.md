@@ -18,6 +18,15 @@ When `privacy_mode=true`, MailRecon must:
 - never persist `profile_candidate` findings whose evidence state is `possible_match`;
 - never expose a persisted `raw_reference` through JSON, CSV, HTML, or PDF exports.
 
+## External-provider disclosure
+
+Persistence privacy and network disclosure are separate controls. Each investigation has an explicit `external_provider_disclosure` setting.
+
+- `true` (default): approved public providers may receive the target for their normal OSINT queries.
+- `false`: public providers are not queried and return an explicit `disabled` provider status rather than a negative finding.
+
+This setting does not silently change the persistence guarantees above. Ollama remains governed separately by its explicit Phase 11 endpoint policy.
+
 Source URLs remain permitted because they are part of the existing evidence provenance model. The target remains stored intentionally for investigation continuity, as stated by the frontend.
 
 This contract does not promise deletion from upstream providers, DNS resolvers, browser history, logs outside MailRecon, or third-party services.
