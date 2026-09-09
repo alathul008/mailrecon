@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.db.session import Base
 from app.models import ExecutionAttempt, GraphEdge, GraphNode, Investigation
 from app.schemas.schemas import InvestigationCreate
+from app.services.orchestrator import run_providers
 
 
 def migration_config(db_path):
@@ -69,6 +71,12 @@ def test_new_investigation_disclosure_defaults_false_and_explicit_opt_in_is_pres
         db.refresh(model_opt_in)
         assert model_default.external_provider_disclosure is False
         assert model_opt_in.external_provider_disclosure is True
+
+
+@pytest.mark.asyncio
+async def test_new_investigation_provider_execution_is_disabled_without_explicit_disclosure():
+    results = await run_providers("test@example.com", "example.com", [], allow_external=False)
+    assert [result.status for result in results] == ["disabled"] * 4
 
 
 def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_stored_disclosure(tmp_path):
