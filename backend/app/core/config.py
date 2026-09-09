@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     api_key: str | None = None
     max_concurrency: int = 8
+    max_queue_depth: int = 100
     request_timeout_seconds: float = 10.0
     execution_lease_seconds: int = 60
     worker_poll_interval_seconds: float = 0.5
