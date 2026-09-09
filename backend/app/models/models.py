@@ -17,7 +17,7 @@ class Investigation(Base):
             initially="DEFERRED",
         ),
     )
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     target: Mapped[str] = mapped_column(String(320), index=True)
     normalized_email: Mapped[str] = mapped_column(String(320), index=True)
     username: Mapped[str] = mapped_column(String(200))
