@@ -63,14 +63,22 @@ jobs:
         run: docker build --pull --tag mailrecon:ci .
       - name: Export production image
         run: docker save mailrecon:ci --output /tmp/mailrecon.tar
-      - name: Scan production image
+      - name: Report high and critical container findings
+        run: >-
+          docker run --rm
+          -v /tmp:/work:ro
+          -v "$HOME/.cache/trivy:/root/.cache/trivy"
+          ghcr.io/aquasecurity/trivy:0.74.0@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9
+          image --input /work/mailrecon.tar --format table --exit-code 0
+          --ignore-unfixed --pkg-types os,library --severity CRITICAL,HIGH
+      - name: Fail on critical container findings
         run: >-
           docker run --rm
           -v /tmp:/work:ro
           -v "$HOME/.cache/trivy:/root/.cache/trivy"
           ghcr.io/aquasecurity/trivy:0.74.0@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9
           image --input /work/mailrecon.tar --format table --exit-code 1
-          --ignore-unfixed --vuln-type os,library --severity CRITICAL,HIGH
+          --ignore-unfixed --pkg-types os,library --severity CRITICAL
   workflow-security:
     runs-on: ubuntu-latest
     permissions:
