@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.db.session import Base, get_db
 from app.main import app
 from app.models import ExecutionAttempt, Finding, GraphEdge, GraphNode, Investigation, ModuleRun
-from app.services.deletion import delete_investigation
+from app.api.routes import delete_inv
 
 
 def make_engine(tmp_path):
@@ -126,7 +126,7 @@ def test_delete_complete_aggregate_and_preserve_other_investigation(tmp_path):
         first_id = first.id
         second_id = second.id
 
-        assert delete_investigation(db, first_id) is True
+        assert delete_inv(first_id, db)["status"] == "deleted"
 
         assert db.get(Investigation, first_id) is None
         assert db.scalars(select(ExecutionAttempt).where(ExecutionAttempt.investigation_id == first_id)).all() == []
@@ -145,10 +145,14 @@ def test_delete_nonexistent_and_repeated_delete_are_deterministic(tmp_path):
     db_engine = make_engine(tmp_path)
     with Session(db_engine) as db:
         inv = add_investigation(db)
-        assert delete_investigation(db, inv.id + 999999) is False
+        with pytest.raises(Exception) as missing:
+            delete_inv(inv.id + 999999, db)
+        assert getattr(missing.value, "status_code", None) == 404
         assert db.get(Investigation, inv.id) is not None
-        assert delete_investigation(db, inv.id) is True
-        assert delete_investigation(db, inv.id) is False
+        assert delete_inv(inv.id, db) == {"id": inv.id, "status": "deleted"}
+        with pytest.raises(Exception) as repeated:
+            delete_inv(inv.id, db)
+        assert getattr(repeated.value, "status_code", None) == 404
 
 
 def test_delete_rolls_back_on_commit_failure(tmp_path, monkeypatch):
@@ -156,7 +160,6 @@ def test_delete_rolls_back_on_commit_failure(tmp_path, monkeypatch):
     with Session(db_engine) as db:
         inv = add_investigation(db)
         inv_id = inv.id
-
         original_commit = db.commit
         rollback_called = False
         original_rollback = db.rollback
@@ -172,7 +175,7 @@ def test_delete_rolls_back_on_commit_failure(tmp_path, monkeypatch):
         monkeypatch.setattr(db, "commit", failing_commit)
         monkeypatch.setattr(db, "rollback", tracking_rollback)
         with pytest.raises(RuntimeError, match="injected commit failure"):
-            delete_investigation(db, inv_id)
+            delete_inv(inv_id, db)
         assert rollback_called is True
         monkeypatch.setattr(db, "commit", original_commit)
         assert db.get(Investigation, inv_id) is not None
@@ -214,7 +217,7 @@ def test_active_worker_cannot_persist_after_investigation_deletion(tmp_path):
         future = executor.submit(worker_attempts_late_write)
         assert ready.wait(timeout=2)
         with SessionLocal() as delete_db:
-            assert delete_investigation(delete_db, inv_id) is True
+            assert delete_inv(inv_id, delete_db)["status"] == "deleted"
         deleted.set()
         future.result(timeout=5)
 
@@ -244,7 +247,7 @@ def test_read_delete_race_does_not_recreate_investigation(tmp_path):
         future = executor.submit(reader)
         assert ready.wait(timeout=2)
         with SessionLocal() as delete_db:
-            assert delete_investigation(delete_db, inv_id) is True
+            assert delete_inv(inv_id, delete_db)["status"] == "deleted"
         deleted.set()
         future.result(timeout=5)
 
