@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import DateTime, Float, Integer, String, Text, ForeignKey, JSON, Boolean
+from sqlalchemy import DateTime, Float, Integer, String, Text, ForeignKey, JSON, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.session import Base
 
@@ -21,11 +21,15 @@ class Investigation(Base):
     execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     execution_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
 
 class Finding(Base):
     __tablename__ = "findings"
+    __table_args__ = (UniqueConstraint("investigation_id", "execution_id", "persistence_key", name="uq_findings_execution_persistence"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    persistence_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String(120))
     source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     finding_type: Mapped[str] = mapped_column(String(120), index=True)
@@ -40,8 +44,10 @@ class Finding(Base):
 
 class ModuleRun(Base):
     __tablename__ = "module_runs"
+    __table_args__ = (UniqueConstraint("investigation_id", "execution_id", "module", name="uq_module_runs_execution_module"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     module: Mapped[str] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(24), default="queued")
     message: Mapped[str | None] = mapped_column(String(500), nullable=True)
