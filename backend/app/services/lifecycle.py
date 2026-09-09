@@ -20,49 +20,25 @@ def _stale_before(now: datetime) -> datetime:
 
 def _mark_attempt_abandoned(db, inv_id: int, attempt_id: str, *, now=None, reason="Execution lease expired"):
     now = now or utcnow()
-    db.execute(
-        update(ExecutionAttempt)
-        .where(
-            ExecutionAttempt.investigation_id == inv_id,
-            ExecutionAttempt.execution_attempt_id == attempt_id,
-            ExecutionAttempt.status == "running",
-        )
-        .values(status="abandoned", finished_at=now, recovered_at=now, recovery_reason=reason)
-    )
-    db.execute(
-        update(ModuleRun)
-        .where(
-            ModuleRun.investigation_id == inv_id,
-            ModuleRun.execution_attempt_id == attempt_id,
-            ModuleRun.status.in_(("queued", "running")),
-        )
-        .values(status="abandoned", finished_at=now)
-        .execution_options(synchronize_session=False)
-    )
+    db.execute(update(ExecutionAttempt).where(ExecutionAttempt.investigation_id == inv_id, ExecutionAttempt.execution_attempt_id == attempt_id, ExecutionAttempt.status == "running").values(status="abandoned", finished_at=now, recovered_at=now, recovery_reason=reason))
+    db.execute(update(ModuleRun).where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_attempt_id == attempt_id, ModuleRun.status.in_(("queued", "running"))).values(status="abandoned", finished_at=now).execution_options(synchronize_session=False))
+
+
+def finish_execution_attempt(db, inv_id: int, attempt_id: str, status: str, *, now=None, reason=None) -> bool:
+    if status not in {"completed", "failed"}:
+        raise ValueError("ExecutionAttempt terminal status must be completed or failed")
+    now = now or utcnow()
+    result = db.execute(update(ExecutionAttempt).where(ExecutionAttempt.investigation_id == inv_id, ExecutionAttempt.execution_attempt_id == attempt_id, ExecutionAttempt.status == "running").values(status=status, finished_at=now, recovery_reason=reason).execution_options(synchronize_session=False))
+    return result.rowcount == 1
 
 
 def recover_stale_investigations(db, *, now=None) -> int:
     now = now or utcnow()
     stale_before = _stale_before(now)
-    stale = db.execute(
-        select(Investigation.id, Investigation.execution_attempt_id)
-        .where(
-            Investigation.status == "running",
-            or_(Investigation.execution_heartbeat_at.is_(None), Investigation.execution_heartbeat_at < stale_before),
-        )
-    ).all()
+    stale = db.execute(select(Investigation.id, Investigation.execution_attempt_id).where(Investigation.status == "running", or_(Investigation.execution_heartbeat_at.is_(None), Investigation.execution_heartbeat_at < stale_before))).all()
     recovered = 0
     for inv_id, stale_attempt_id in stale:
-        result = db.execute(
-            update(Investigation)
-            .where(
-                Investigation.id == inv_id,
-                Investigation.status == "running",
-                or_(Investigation.execution_heartbeat_at.is_(None), Investigation.execution_heartbeat_at < stale_before),
-            )
-            .values(status="queued", execution_token=None, execution_started_at=None, execution_heartbeat_at=None, completed_at=None)
-            .execution_options(synchronize_session=False)
-        )
+        result = db.execute(update(Investigation).where(Investigation.id == inv_id, Investigation.status == "running", or_(Investigation.execution_heartbeat_at.is_(None), Investigation.execution_heartbeat_at < stale_before)).values(status="queued", execution_token=None, execution_started_at=None, execution_heartbeat_at=None, completed_at=None).execution_options(synchronize_session=False))
         if result.rowcount != 1:
             continue
         if stale_attempt_id:
@@ -73,13 +49,7 @@ def recover_stale_investigations(db, *, now=None) -> int:
 
 
 def _create_attempt(db, inv_id: int, execution_id: str, attempt_id: str, *, now, status="running"):
-    db.add(ExecutionAttempt(
-        investigation_id=inv_id,
-        execution_id=execution_id,
-        execution_attempt_id=attempt_id,
-        status=status,
-        started_at=now,
-    ))
+    db.add(ExecutionAttempt(investigation_id=inv_id, execution_id=execution_id, execution_attempt_id=attempt_id, status=status, started_at=now))
 
 
 def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
@@ -88,68 +58,29 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     stale_before = _stale_before(now)
     generated_execution_id = str(uuid.uuid4())
     generated_attempt_id = str(uuid.uuid4())
-
-    current = db.execute(
-        select(Investigation.execution_id, Investigation.execution_attempt_id, Investigation.status, Investigation.execution_heartbeat_at)
-        .where(Investigation.id == inv_id)
-    ).one_or_none()
+    current = db.execute(select(Investigation.execution_id, Investigation.execution_attempt_id, Investigation.status, Investigation.execution_heartbeat_at).where(Investigation.id == inv_id)).one_or_none()
     if current is None:
         return None
     old_execution_id, old_attempt_id, old_status, old_heartbeat = current
     stale_claim = old_status == "running" and (old_heartbeat is None or old_heartbeat < stale_before)
-
-    result = db.execute(
-        update(Investigation)
-        .where(
-            Investigation.id == inv_id,
-            or_(
-                Investigation.status == "queued",
-                and_(Investigation.status == "running", or_(Investigation.execution_heartbeat_at.is_(None), Investigation.execution_heartbeat_at < stale_before)),
-            ),
-        )
-        .values(
-            status="running",
-            execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
-            execution_attempt_id=generated_attempt_id,
-            execution_token=token,
-            execution_started_at=now,
-            execution_heartbeat_at=now,
-            completed_at=None,
-        )
-        .execution_options(synchronize_session=False)
-    )
+    result = db.execute(update(Investigation).where(Investigation.id == inv_id, or_(Investigation.status == "queued", and_(Investigation.status == "running", or_(Investigation.execution_heartbeat_at.is_(None), Investigation.execution_heartbeat_at < stale_before)))).values(status="running", execution_id=func.coalesce(Investigation.execution_id, generated_execution_id), execution_attempt_id=generated_attempt_id, execution_token=token, execution_started_at=now, execution_heartbeat_at=now, completed_at=None).execution_options(synchronize_session=False))
     if result.rowcount != 1:
         db.rollback()
         return None
-
     inv = db.get(Investigation, inv_id)
     if not inv or not inv.execution_id or not inv.execution_attempt_id:
         db.rollback()
         raise RuntimeError("Investigation claim has incomplete execution provenance")
-
     if stale_claim and old_attempt_id:
         _mark_attempt_abandoned(db, inv_id, old_attempt_id, now=now, reason="Superseded by a new worker claim")
-
     _create_attempt(db, inv_id, inv.execution_id, inv.execution_attempt_id, now=now)
-
-    # API-created queued module rows intentionally have no worker attempt yet.
-    # Bind only those rows; historical attempt rows are never rewritten.
-    db.execute(
-        update(ModuleRun)
-        .where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_attempt_id.is_(None))
-        .values(execution_id=inv.execution_id, execution_attempt_id=inv.execution_attempt_id)
-    )
+    db.execute(update(ModuleRun).where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_attempt_id.is_(None)).values(execution_id=inv.execution_id, execution_attempt_id=inv.execution_attempt_id))
     db.commit()
     return token
 
 
 def fence_execution(db, inv_id: int, token: str) -> tuple[str, str]:
-    result = db.execute(
-        update(Investigation)
-        .where(Investigation.id == inv_id, Investigation.status == "running", Investigation.execution_token == token)
-        .values(execution_heartbeat_at=utcnow())
-        .execution_options(synchronize_session=False)
-    )
+    result = db.execute(update(Investigation).where(Investigation.id == inv_id, Investigation.status == "running", Investigation.execution_token == token).values(execution_heartbeat_at=utcnow()).execution_options(synchronize_session=False))
     if result.rowcount != 1:
         db.rollback()
         raise RuntimeError("Investigation execution lease is no longer owned")
@@ -182,11 +113,9 @@ def _queued_ids(db, limit: int) -> list[int]:
 async def worker_loop(stop_event: asyncio.Event):
     settings = get_settings()
     active: set[asyncio.Task] = set()
-
     async def execute(inv_id: int, token: str):
         from app.services.orchestrator import run_investigation
         await run_investigation(inv_id, token)
-
     while not stop_event.is_set():
         with SessionLocal() as db:
             recover_stale_investigations(db)
