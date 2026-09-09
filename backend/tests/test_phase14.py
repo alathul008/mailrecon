@@ -28,7 +28,7 @@ def test_phase14_migration_adds_attempt_scoped_foreign_keys(tmp_path):
         fk["name"] for fk in inspector.get_foreign_keys("module_runs")
     }
     with engine.connect() as conn:
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0007"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
 
 
 def test_phase14_migration_refuses_cross_investigation_attempt_reference(tmp_path):
@@ -76,7 +76,7 @@ def test_phase14_runtime_image_removes_installation_tooling():
     dockerfile = Path("Dockerfile").read_text()
     assert "pip uninstall -y pip setuptools" in dockerfile
     assert "requirements.lock" in dockerfile
-    assert "pip install --no-cache-dir --requirement requirements.lock" in dockerfile
+    assert "pip install --no-cache-dir --require-hashes --requirement requirements.lock" in dockerfile
 
 
 def test_phase14_claim_guard_is_present():
