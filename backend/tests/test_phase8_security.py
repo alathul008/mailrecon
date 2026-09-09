@@ -1,15 +1,22 @@
-import asyncio
-
 import pytest
+from alembic import command
+from alembic.config import Config
+from fastapi import HTTPException
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
 
 from app.api.routes import csv_safe, create
 from app.core.config import get_settings
 from app.db.session import Base
 from app.schemas.schemas import InvestigationCreate
 from app.services import schema
+
+
+def migration_config(db_path):
+    cfg = Config()
+    cfg.set_main_option("script_location", "backend/alembic")
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    return cfg
 
 
 def test_csv_safe_neutralizes_formula_prefixes():
@@ -28,8 +35,7 @@ async def test_investigation_queue_depth_is_enforced(tmp_path):
     settings.max_queue_depth = 1
     try:
         with Session(engine) as db:
-            payload = InvestigationCreate(email="one@example.com")
-            first = await create(payload, db)
+            first = await create(InvestigationCreate(email="one@example.com"), db)
             assert first["status"] == "queued"
             with pytest.raises(HTTPException) as exc:
                 await create(InvestigationCreate(email="two@example.com"), db)
@@ -54,5 +60,25 @@ def test_runtime_schema_bootstrap_reaches_head_and_detects_physical_drift(tmp_pa
 
         with pytest.raises(RuntimeError, match="columns diverge"):
             schema.ensure_schema()
+    finally:
+        settings.database_url = old_url
+
+
+def test_runtime_schema_bootstraps_unversioned_phase6_database(tmp_path, monkeypatch):
+    db_path = tmp_path / "legacy.db"
+    cfg = migration_config(db_path)
+    command.upgrade(cfg, "0002")
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE alembic_version"))
+
+    monkeypatch.setattr(schema, "engine", engine)
+    settings = get_settings()
+    old_url = settings.database_url
+    settings.database_url = f"sqlite:///{db_path}"
+    try:
+        schema.ensure_schema()
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
     finally:
         settings.database_url = old_url
