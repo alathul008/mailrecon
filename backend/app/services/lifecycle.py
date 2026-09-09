@@ -82,11 +82,15 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     inv = db.get(Investigation, inv_id)
     if not inv:
         raise RuntimeError("Investigation claim disappeared")
+    # Bulk UPDATEs intentionally avoid ORM synchronization; refresh the row so
+    # sessions configured with expire_on_commit=False still observe the claim.
+    db.refresh(inv)
     # ORM-created legacy rows normally already have execution_id. This fallback
     # also makes claims safe for Phase 6 databases where it was not persisted.
     if not inv.execution_id:
         inv.execution_id = generated_execution_id
         db.commit()
+        db.refresh(inv)
     if not inv.execution_attempt_id:
         raise RuntimeError("Investigation claim has incomplete execution-attempt provenance")
 
