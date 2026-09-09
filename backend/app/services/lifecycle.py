@@ -66,9 +66,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
         .values(
             status="running",
-            # execution_id is the stable logical acquisition identity.
             execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
-            # Every successful claim is a distinct worker execution attempt.
             execution_attempt_id=generated_attempt_id,
             execution_token=token,
             execution_started_at=now,
@@ -82,8 +80,15 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         return None
 
     inv = db.get(Investigation, inv_id)
-    if not inv or not inv.execution_id or not inv.execution_attempt_id:
-        raise RuntimeError("Investigation claim has incomplete execution provenance")
+    if not inv:
+        raise RuntimeError("Investigation claim disappeared")
+    # ORM-created legacy rows normally already have execution_id. This fallback
+    # also makes claims safe for Phase 6 databases where it was not persisted.
+    if not inv.execution_id:
+        inv.execution_id = generated_execution_id
+        db.commit()
+    if not inv.execution_attempt_id:
+        raise RuntimeError("Investigation claim has incomplete execution-attempt provenance")
 
     # Legacy Phase 6/early Phase 7 rows did not carry execution provenance.
     # Attach them to the first actual worker attempt; later recovery attempts
