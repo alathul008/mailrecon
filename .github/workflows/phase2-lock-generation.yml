@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - run: cd frontend && npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run: cd frontend && npm install vitest@4.1.11 --save-dev --package-lock-only --ignore-scripts --no-audit --no-fund --legacy-peer-deps
       - name: Commit generated lockfile
         run: |
           git config user.name 'github-actions[bot]'
