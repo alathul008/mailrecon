@@ -37,6 +37,7 @@ def recover_stale_investigations(db, *, now=None) -> int:
             execution_heartbeat_at=None,
             completed_at=None,
         )
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     return result.rowcount
@@ -73,6 +74,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
             execution_heartbeat_at=now,
             completed_at=None,
         )
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     if result.rowcount != 1:
@@ -85,11 +87,13 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         update(Finding)
         .where(Finding.investigation_id == inv_id, Finding.execution_id.is_(None))
         .values(execution_id=execution_id)
+        .execution_options(synchronize_session=False)
     )
     db.execute(
         update(ModuleRun)
         .where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_id.is_(None))
         .values(execution_id=execution_id)
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     return token
@@ -105,6 +109,7 @@ def heartbeat_investigation(db, inv_id: int, token: str, *, now=None) -> bool:
             Investigation.execution_token == token,
         )
         .values(execution_heartbeat_at=now)
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     return result.rowcount == 1
