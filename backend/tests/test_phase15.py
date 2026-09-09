@@ -142,7 +142,7 @@ async def test_ollama_client_disables_environment_proxy_routing(monkeypatch):
 def test_frontend_exposes_external_provider_disclosure_separately():
     api = Path("frontend/src/services/api.ts").read_text(encoding="utf-8")
     lookup = Path("frontend/src/pages/Lookup.tsx").read_text(encoding="utf-8")
-    assert "external_provider_disclosure = true" in api
+    assert "external_provider_disclosure = false" in api
     assert "external_provider_disclosure" in api
     assert "setExternalDisclosure" in lookup
     assert "Privacy mode" in lookup
@@ -153,8 +153,8 @@ def test_docker_and_ci_use_the_same_python_lockfile():
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert "requirements.lock" in dockerfile
-    assert "pip install --no-cache-dir --requirement requirements.lock" in dockerfile
-    assert "pip install -r backend/requirements.lock" in workflow
+    assert "pip install --no-cache-dir --require-hashes --requirement requirements.lock" in dockerfile
+    assert "pip install --require-hashes -r backend/requirements.lock" in workflow
     assert "pip-audit -r backend/requirements.lock --strict" in workflow
 
 
