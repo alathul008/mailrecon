@@ -27,6 +27,26 @@ def _require_ownership(db, inv_id, token):
         raise RuntimeError("Investigation execution lease is no longer owned")
 
 
+def _capture_owned_execution(db, inv_id, token):
+    """Capture the logical and attempt identities owned by this worker token."""
+    row=db.execute(select(
+        Investigation.execution_id,
+        Investigation.execution_attempt_id,
+    ).where(
+        Investigation.id==inv_id,
+        Investigation.status=="running",
+        Investigation.execution_token==token,
+    )).one_or_none()
+    if row is None:
+        raise RuntimeError("Investigation execution lease is no longer owned")
+    execution_id, execution_attempt_id=row
+    if not execution_id:
+        raise RuntimeError("Investigation has no durable logical execution identity")
+    if not execution_attempt_id:
+        raise RuntimeError("Investigation has no durable execution-attempt provenance")
+    return execution_id, execution_attempt_id
+
+
 def _persistence_key(f):
     """Stable semantic key for one finding within one durable execution/acquisition.
 
@@ -46,23 +66,28 @@ def _persistence_key(f):
 
 def set_module(db,inv_id,name,status,message=None,token=None):
     if token is not None:
-        _require_ownership(db,inv_id,token)
+        execution_id, execution_attempt_id=_capture_owned_execution(db,inv_id,token)
+    else:
+        execution_id=execution_attempt_id=None
     inv=db.get(Investigation,inv_id)
     if not inv: return
-    if not inv.execution_id:
+    if token is None:
+        execution_id=inv.execution_id
+        execution_attempt_id=inv.execution_attempt_id
+    if not execution_id:
         raise RuntimeError("Investigation has no durable logical execution identity")
-    if token is not None and not inv.execution_attempt_id:
+    if token is not None and not execution_attempt_id:
         raise RuntimeError("Investigation has no durable execution-attempt provenance")
     m=db.scalar(select(ModuleRun).where(
         ModuleRun.investigation_id==inv_id,
-        ModuleRun.execution_attempt_id==inv.execution_attempt_id,
+        ModuleRun.execution_attempt_id==execution_attempt_id,
         ModuleRun.module==name,
-    )) if inv.execution_attempt_id else None
+    )) if execution_attempt_id else None
     if not m:
         m=ModuleRun(
             investigation_id=inv_id,
-            execution_id=inv.execution_id,
-            execution_attempt_id=inv.execution_attempt_id,
+            execution_id=execution_id,
+            execution_attempt_id=execution_attempt_id,
             module=name,
         )
         db.add(m)
@@ -75,12 +100,17 @@ def set_module(db,inv_id,name,status,message=None,token=None):
 def add_findings(db,inv_id,fs,token=None):
     if not fs: return
     if token is not None:
-        _require_ownership(db,inv_id,token)
+        execution_id, execution_attempt_id=_capture_owned_execution(db,inv_id,token)
+    else:
+        execution_id=execution_attempt_id=None
     inv=db.get(Investigation,inv_id)
     if not inv: return
-    if not inv.execution_id:
+    if token is None:
+        execution_id=inv.execution_id
+        execution_attempt_id=inv.execution_attempt_id
+    if not execution_id:
         raise RuntimeError("Investigation has no durable logical execution identity")
-    if token is not None and not inv.execution_attempt_id:
+    if token is not None and not execution_attempt_id:
         raise RuntimeError("Investigation has no durable execution-attempt provenance")
     inserted=set()
     for f in fs:
@@ -92,13 +122,13 @@ def add_findings(db,inv_id,fs,token=None):
         key=_persistence_key(f)
         if key in inserted:
             continue
-        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id,Finding.persistence_key==key))
+        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==execution_id,Finding.persistence_key==key))
         if existing:
             inserted.add(key)
             continue
         legacy=db.scalar(select(Finding.id).where(
             Finding.investigation_id==inv_id,
-            Finding.execution_id==inv.execution_id,
+            Finding.execution_id==execution_id,
             Finding.persistence_key.is_(None),
             Finding.source==f.get("source"),
             Finding.source_url==f.get("source_url"),
@@ -111,8 +141,8 @@ def add_findings(db,inv_id,fs,token=None):
             continue
         db.add(Finding(
             investigation_id=inv_id,
-            execution_id=inv.execution_id,
-            execution_attempt_id=inv.execution_attempt_id,
+            execution_id=execution_id,
+            execution_attempt_id=execution_attempt_id,
             persistence_key=key,
             **f,
         ))
