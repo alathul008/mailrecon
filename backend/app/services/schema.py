@@ -4,7 +4,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
 from app.db.session import engine, Base
@@ -61,7 +61,7 @@ def _infer_unversioned_revision() -> str:
     return "0001"
 
 def _validate_physical_schema() -> None:
-    inspector = inspect(engine); actual_tables = set(inspector.get_table_names()) - {"alembic_version"}; expected_tables = set(Base.metadata.tables)
+    inspector = inspect(engine); dialect_name = engine.dialect.name; actual_tables = set(inspector.get_table_names()) - {"alembic_version"}; expected_tables = set(Base.metadata.tables)
     if actual_tables != expected_tables: raise RuntimeError(f"Database tables diverge from ORM metadata: expected {sorted(expected_tables)}, got {sorted(actual_tables)}")
     for table_name, table in Base.metadata.tables.items():
         actual_columns = {c["name"] for c in inspector.get_columns(table_name)}; expected_columns = set(table.columns.keys())
@@ -76,11 +76,12 @@ def _validate_physical_schema() -> None:
     for table_name, constraints in REQUIRED_EXECUTION_FOREIGN_KEYS.items():
         actual = {fk["name"]: (fk["referred_table"], tuple(fk["constrained_columns"]), tuple(fk["referred_columns"])) for fk in inspector.get_foreign_keys(table_name)}
         for name, expected in constraints.items():
-            if table_name == "investigations" and inspector.bind.dialect.name == "sqlite": continue
+            if dialect_name == "sqlite" and table_name == "investigations": continue
             if actual.get(name) != expected: foreign_key_drift.append(name)
     if foreign_key_drift: raise RuntimeError(f"Database execution foreign keys diverge from Alembic contract: {sorted(foreign_key_drift)}")
-    if inspector.bind.dialect.name == "sqlite":
-        actual_triggers = {row[0] for row in engine.connect().execute(__import__('sqlalchemy').text("SELECT name FROM sqlite_master WHERE type='trigger'")).fetchall()}
+    if dialect_name == "sqlite":
+        with engine.connect() as connection:
+            actual_triggers = {row[0] for row in connection.execute(text("SELECT name FROM sqlite_master WHERE type='trigger'"))}
         missing_triggers = SQLITE_INVESTIGATION_ATTEMPT_TRIGGERS - actual_triggers
         if missing_triggers: raise RuntimeError(f"Database SQLite execution-attempt guards diverge from Alembic contract: {sorted(missing_triggers)}")
     graph_constraints = {table: {item["name"]: tuple(item["column_names"]) for item in inspect(engine).get_unique_constraints(table)} for table in REQUIRED_GRAPH_UNIQUENESS}
