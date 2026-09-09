@@ -125,9 +125,9 @@ export async function downloadReport(id: number, format: string) {
 export function createInvestigation(
   email: string,
   privacy_mode = false,
-  external_provider_disclosure = true,
+  external_provider_disclosure = false,
 ) {
-  return request<{ id: number; status: string }>('/investigations', {
+  return request<{ id: number; status: string; external_provider_disclosure: boolean }>('/investigations', {
     method: 'POST',
     body: JSON.stringify({ email, privacy_mode, external_provider_disclosure }),
   });
