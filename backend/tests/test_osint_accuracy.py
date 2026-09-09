@@ -16,9 +16,8 @@ from app.providers.gravatar import GravatarProvider
 from app.providers import github as github_module
 from app.providers import gravatar as gravatar_module
 from app.risk.engine import calculate
-from app.services.orchestrator import add_findings, _finding_evidence_state, _rdap_domain_consistency
+from app.services.orchestrator import add_findings, _finding_evidence_state, _rdap_domain_consistency, _graph_relation
 from app.providers.base import ProviderResult
-from app.providers import rdap as rdap_module
 import httpx
 
 
@@ -64,6 +63,12 @@ def test_evidence_states_are_not_numeric_confidence():
     assert [_finding_evidence_state(type("Row", (), row)()) for row in rows] == [EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED]
 
 
+def test_confidence_does_not_override_evidence_state():
+    analysis = {"disposable": False, "suspicious_chars": False, "idn": False, "has_dmarc": True, "has_spf": True, "dnssec": None}
+    weak = [{"finding_type": "profile_candidate", "value": "https://github.com/johnsmith", "confidence": 0.99, "notes": f"Evidence state: {EVIDENCE_POSSIBLE}. username only"}]
+    assert calculate(analysis, weak).dimensions["identity_exposure"] == 0
+
+
 def test_risk_ignores_weak_profile_evidence_but_accepts_corroborated_profile():
     analysis = {"disposable": False, "suspicious_chars": False, "idn": False, "has_dmarc": True, "has_spf": True, "dnssec": None}
     weak = [{"finding_type": "profile_candidate", "value": "https://github.com/johnsmith", "confidence": 0.95, "notes": f"Evidence state: {EVIDENCE_POSSIBLE}. username only"}]
@@ -89,6 +94,15 @@ def test_rdap_domain_mismatch_is_warning_not_identity_assertion():
     assert result["finding_type"] == "domain_correlation"
     assert "mismatch" in result["value"]
     assert result["severity"] == "warning"
+
+
+def test_graph_relations_preserve_evidence_state():
+    assert _graph_relation("profile_candidate", EVIDENCE_DERIVED) == "possible_profile"
+    assert _graph_relation("profile_candidate", EVIDENCE_POSSIBLE) == "possible_profile"
+    assert _graph_relation("profile_candidate", EVIDENCE_CORROBORATED) == "corroborated_profile"
+    assert _graph_relation("public_identity", EVIDENCE_SOURCE_ASSOCIATED) == "source_associated_identity"
+    assert _graph_relation("breach", None) == "historical_breach_exposure"
+    assert _graph_relation("profile_candidate", EVIDENCE_CORROBORATED) != "associated_identity"
 
 
 @pytest.mark.asyncio
