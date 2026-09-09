@@ -110,6 +110,42 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     return token
 
 
+def fence_execution(db, inv_id: int, token: str) -> tuple[str, str]:
+    """Acquire the investigation row lock and fence the worker token atomically.
+
+    The ownership check and subsequent persistence must share one database
+    transaction. A successful conditional UPDATE locks the investigation row
+    until the caller commits, so stale recovery cannot reclaim the row between
+    validation and mutation.
+    """
+    result = db.execute(
+        update(Investigation)
+        .where(
+            Investigation.id == inv_id,
+            Investigation.status == "running",
+            Investigation.execution_token == token,
+        )
+        .values(execution_heartbeat_at=utcnow())
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise RuntimeError("Investigation execution lease is no longer owned")
+
+    row = db.execute(
+        select(Investigation.execution_id, Investigation.execution_attempt_id)
+        .where(Investigation.id == inv_id)
+    ).one_or_none()
+    if row is None:
+        db.rollback()
+        raise RuntimeError("Investigation execution lease disappeared")
+    execution_id, execution_attempt_id = row
+    if not execution_id or not execution_attempt_id:
+        db.rollback()
+        raise RuntimeError("Investigation has incomplete execution provenance")
+    return execution_id, execution_attempt_id
+
+
 def heartbeat_investigation(db, inv_id: int, token: str, *, now=None) -> bool:
     now = now or utcnow()
     result = db.execute(
