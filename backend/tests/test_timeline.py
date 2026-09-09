@@ -118,8 +118,8 @@ def test_timeline_uses_first_seen_for_observation_time_and_preserves_collection_
 
 
 def test_timeline_uses_rdap_domain_event_date_not_collection_time():
-    collected = datetime(2026, 9, 9, 6, 0, tzinfo=timezone.utc)
-    event_date = datetime(2025, 1, 2, 0, 0, tzinfo=timezone.utc)
+    collected = datetime(2026, 9, 9, 6, 0)
+    event_date = datetime(2025, 1, 2, 0, 0)
     with Session(make_db()) as db:
         inv = add_investigation(db)
         add_finding(
@@ -169,9 +169,9 @@ def test_timeline_deduplicates_only_exact_semantic_duplicates():
 
 
 def test_timeline_preserves_separate_collection_times_for_same_first_seen():
-    first_seen = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-    first_collection = datetime(2026, 9, 1, 0, 0, tzinfo=timezone.utc)
-    second_collection = datetime(2026, 9, 9, 0, 0, tzinfo=timezone.utc)
+    first_seen = datetime(2026, 1, 1, 0, 0)
+    first_collection = datetime(2026, 9, 1, 0, 0)
+    second_collection = datetime(2026, 9, 9, 0, 0)
     with Session(make_db()) as db:
         inv = add_investigation(db)
         add_finding(
