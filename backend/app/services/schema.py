@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
@@ -15,9 +13,8 @@ LEGACY_TABLES = {"investigations", "findings", "module_runs", "graph_nodes", "gr
 
 
 def _config() -> Config:
-    root = Path(__file__).resolve().parents[3]
-    cfg = Config(str(root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(root / "backend" / "alembic"))
+    cfg = Config()
+    cfg.set_main_option("script_location", "backend/alembic")
     cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
     return cfg
 
