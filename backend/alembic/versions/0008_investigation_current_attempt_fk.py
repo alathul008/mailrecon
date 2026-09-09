@@ -7,44 +7,39 @@ branch_labels = None
 depends_on = None
 
 CONSTRAINT_NAME = "fk_investigations_execution_attempt_investigation"
+SQLITE_GUARD_INSERT = "trg_investigations_current_attempt_guard_insert"
+SQLITE_GUARD_UPDATE = "trg_investigations_current_attempt_guard_update"
+SQLITE_GUARD_DELETE = "trg_execution_attempts_current_investigation_guard_delete"
 
 
 def _validate_current_attempt_references(bind):
-    rows = bind.execute(
-        sa.text(
-            """
-            SELECT i.id, i.execution_attempt_id, i.execution_id
-            FROM investigations AS i
-            LEFT JOIN execution_attempts AS ea
-              ON ea.investigation_id = i.id
-             AND ea.execution_attempt_id = i.execution_attempt_id
-            WHERE i.execution_attempt_id IS NOT NULL
-              AND ea.id IS NULL
-            ORDER BY i.id, i.execution_attempt_id
-            """
-        )
-    ).fetchall()
+    rows = bind.execute(sa.text("""
+        SELECT i.id, i.execution_attempt_id, i.execution_id
+        FROM investigations AS i
+        LEFT JOIN execution_attempts AS ea
+          ON ea.investigation_id = i.id
+         AND ea.execution_attempt_id = i.execution_attempt_id
+        WHERE i.execution_attempt_id IS NOT NULL
+          AND ea.id IS NULL
+        ORDER BY i.id, i.execution_attempt_id
+    """)).fetchall()
     if rows:
         raise RuntimeError(
             "Ambiguous current-attempt provenance: investigation execution_attempt_id "
             f"does not belong to that investigation; rows={rows[:5]!r}"
         )
 
-    mismatch_rows = bind.execute(
-        sa.text(
-            """
-            SELECT i.id, i.execution_attempt_id, i.execution_id, ea.execution_id
-            FROM investigations AS i
-            JOIN execution_attempts AS ea
-              ON ea.investigation_id = i.id
-             AND ea.execution_attempt_id = i.execution_attempt_id
-            WHERE i.execution_attempt_id IS NOT NULL
-              AND i.execution_id IS NOT NULL
-              AND i.execution_id != ea.execution_id
-            ORDER BY i.id, i.execution_attempt_id
-            """
-        )
-    ).fetchall()
+    mismatch_rows = bind.execute(sa.text("""
+        SELECT i.id, i.execution_attempt_id, i.execution_id, ea.execution_id
+        FROM investigations AS i
+        JOIN execution_attempts AS ea
+          ON ea.investigation_id = i.id
+         AND ea.execution_attempt_id = i.execution_attempt_id
+        WHERE i.execution_attempt_id IS NOT NULL
+          AND i.execution_id IS NOT NULL
+          AND i.execution_id != ea.execution_id
+        ORDER BY i.id, i.execution_attempt_id
+    """)).fetchall()
     if mismatch_rows:
         raise RuntimeError(
             "Ambiguous current-attempt provenance: investigation execution_id "
@@ -57,25 +52,63 @@ def upgrade():
     _validate_current_attempt_references(bind)
 
     if bind.dialect.name == "sqlite":
-        metadata = sa.MetaData()
-        investigations = sa.Table("investigations", metadata, autoload_with=bind)
-        execution_attempts = sa.Table("execution_attempts", metadata, autoload_with=bind)
-        investigations.append_constraint(
-            sa.ForeignKeyConstraint(
-                ["id", "execution_attempt_id"],
-                [
-                    execution_attempts.c.investigation_id,
-                    execution_attempts.c.execution_attempt_id,
-                ],
-                name=CONSTRAINT_NAME,
+        # SQLite batch recreation cannot safely add this circular composite
+        # relationship to existing databases. Triggers enforce the same
+        # investigation-scoped invariant without rewriting the table.
+        op.execute(sa.text(f"""
+            CREATE TRIGGER {SQLITE_GUARD_INSERT}
+            BEFORE INSERT ON investigations
+            WHEN NEW.execution_attempt_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'investigation current execution attempt does not belong to investigation')
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM execution_attempts
+                    WHERE investigation_id = NEW.id
+                      AND execution_attempt_id = NEW.execution_attempt_id
+                );
+                SELECT RAISE(ABORT, 'investigation execution_id does not match current execution attempt')
+                WHERE EXISTS (
+                    SELECT 1 FROM execution_attempts
+                    WHERE investigation_id = NEW.id
+                      AND execution_attempt_id = NEW.execution_attempt_id
+                      AND NEW.execution_id IS NOT NULL
+                      AND execution_id != NEW.execution_id
+                );
+            END
+        """))
+        op.execute(sa.text(f"""
+            CREATE TRIGGER {SQLITE_GUARD_UPDATE}
+            BEFORE UPDATE OF execution_attempt_id, execution_id ON investigations
+            WHEN NEW.execution_attempt_id IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'investigation current execution attempt does not belong to investigation')
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM execution_attempts
+                    WHERE investigation_id = NEW.id
+                      AND execution_attempt_id = NEW.execution_attempt_id
+                );
+                SELECT RAISE(ABORT, 'investigation execution_id does not match current execution attempt')
+                WHERE EXISTS (
+                    SELECT 1 FROM execution_attempts
+                    WHERE investigation_id = NEW.id
+                      AND execution_attempt_id = NEW.execution_attempt_id
+                      AND NEW.execution_id IS NOT NULL
+                      AND execution_id != NEW.execution_id
+                );
+            END
+        """))
+        op.execute(sa.text(f"""
+            CREATE TRIGGER {SQLITE_GUARD_DELETE}
+            BEFORE DELETE ON execution_attempts
+            WHEN EXISTS (
+                SELECT 1 FROM investigations
+                WHERE id = OLD.investigation_id
+                  AND execution_attempt_id = OLD.execution_attempt_id
             )
-        )
-        with op.batch_alter_table(
-            "investigations",
-            recreate="always",
-            copy_from=investigations,
-        ):
-            pass
+            BEGIN
+                SELECT RAISE(ABORT, 'cannot delete current execution attempt');
+            END
+        """))
     else:
         op.create_foreign_key(
             CONSTRAINT_NAME,
@@ -89,21 +122,7 @@ def upgrade():
 def downgrade():
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
-        metadata = sa.MetaData()
-        investigations = sa.Table("investigations", metadata, autoload_with=bind)
-        fk = next(
-            constraint
-            for constraint in investigations.constraints
-            if isinstance(constraint, sa.ForeignKeyConstraint)
-            and [element.target_fullname for element in constraint.elements]
-            == ["execution_attempts.investigation_id", "execution_attempts.execution_attempt_id"]
-        )
-        investigations.constraints.remove(fk)
-        with op.batch_alter_table(
-            "investigations",
-            recreate="always",
-            copy_from=investigations,
-        ):
-            pass
+        for trigger_name in (SQLITE_GUARD_DELETE, SQLITE_GUARD_UPDATE, SQLITE_GUARD_INSERT):
+            op.execute(sa.text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
     else:
         op.drop_constraint(CONSTRAINT_NAME, "investigations", type_="foreignkey")
