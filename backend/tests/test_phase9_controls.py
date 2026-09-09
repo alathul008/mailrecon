@@ -1,13 +1,12 @@
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.core import rate_limit
 from app.db.session import Base
 from app.models import Finding, Investigation
-from app.reports.render import pdf_report
+from app.reports.render import _pdf_text, pdf_report
 from app.services.orchestrator import add_findings
 from app.services import lifecycle
 
@@ -86,7 +85,5 @@ def test_pdf_report_escapes_reportlab_markup():
         severity="<i>high</i>",
     )
     buffer = pdf_report(inv, [finding], [{"delta": 1, "reason": "<b>unsafe</b> & reason"}])
-    data = buffer.read()
-    assert data.startswith(b"%PDF")
-    assert b"attacker" in data
-
+    assert buffer.read().startswith(b"%PDF")
+    assert _pdf_text("<b>attacker</b>&target") == "&lt;b&gt;attacker&lt;/b&gt;&amp;target"
