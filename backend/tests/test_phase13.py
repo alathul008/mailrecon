@@ -6,8 +6,8 @@ from alembic import command
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from app.api.routes import graph, report_provenance
-from app.models import ExecutionAttempt, GraphEdge, GraphNode, Investigation
+from app.api.routes import graph, report, report_provenance
+from app.models import ExecutionAttempt, Finding, GraphEdge, GraphNode, Investigation
 
 
 def migration_config(db_path):
@@ -90,6 +90,21 @@ def test_report_provenance_contains_execution_and_privacy_metadata(tmp_path):
         assert provenance["privacy_mode"] is True
         assert provenance["report_generated_at"] == generated
         assert provenance["graph_semantics"] == "current_derived_view"
+
+
+def test_html_report_labels_unspecified_finding_without_attempt_as_unspecified(tmp_path):
+    engine=create_engine(f"sqlite:///{tmp_path / 'html-report.db'}")
+    from app.db.session import Base
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        inv=Investigation(target="test@example.com",normalized_email="test@example.com",username="test",domain="example.com",status="completed",execution_id="exec-1",execution_attempt_id="attempt-1")
+        db.add(inv); db.commit(); db.refresh(inv)
+        db.add(Finding(investigation_id=inv.id,source="test",finding_type="email",value="test@example.com",confidence=1.0,severity="info",execution_attempt_id=None))
+        db.commit()
+        response=report(inv.id,"html",db)
+        assert response.status_code == 200
+        assert "unspecified" in response.body.decode()
+        assert "historical" not in response.body.decode()
 
 
 def test_docker_build_uses_lockfile_enforced_npm_ci():
