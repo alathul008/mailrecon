@@ -67,7 +67,7 @@ def calculate(analysis: dict, findings: list[dict]) -> RiskResult:
     if analysis.get("has_dmarc") is False:
         dims["domain_security"] += 10
         factors.append({"delta": 10, "dimension": "domain_security", "reason": "DMARC not observed"})
-    else:
+    elif analysis.get("has_dmarc") is True:
         dims["domain_security"] = max(0, dims["domain_security"] - 5)
         factors.append({"delta": -5, "dimension": "domain_security", "reason": "DMARC observed (mitigating signal)"})
 
