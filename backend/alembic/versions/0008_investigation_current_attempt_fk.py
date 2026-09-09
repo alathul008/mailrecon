@@ -6,7 +6,6 @@ down_revision = "0007"
 branch_labels = None
 depends_on = None
 
-
 CONSTRAINT_NAME = "fk_investigations_execution_attempt_investigation"
 
 
@@ -63,7 +62,6 @@ def upgrade():
             "execution_attempts",
             ["id", "execution_attempt_id"],
             ["investigation_id", "execution_attempt_id"],
-            ondelete="SET NULL",
         )
 
 
