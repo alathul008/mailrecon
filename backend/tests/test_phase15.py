@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -12,7 +14,10 @@ from app.services.lifecycle import claim_investigation, fence_execution, recover
 
 
 def make_db(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'phase15.db'}")
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'phase15.db'}",
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine)
     return engine
 
@@ -32,14 +37,26 @@ def add_inv(db):
 
 def test_concurrent_claims_only_one_worker_owns_queued_investigation(tmp_path):
     engine = make_db(tmp_path)
-    with Session(engine) as first_db, Session(engine) as second_db:
-        inv = add_inv(first_db)
-        first_token = claim_investigation(first_db, inv.id)
-        assert first_token
-        assert claim_investigation(second_db, inv.id) is None
-        current = second_db.get(Investigation, inv.id)
+    with Session(engine) as db:
+        inv = add_inv(db)
+        inv_id = inv.id
+
+    barrier = Barrier(2)
+
+    def claim_from_separate_session():
+        with Session(engine) as db:
+            barrier.wait()
+            return claim_investigation(db, inv_id)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = pool.map(lambda _: claim_from_separate_session(), range(2))
+
+    tokens = [token for token in (first, second) if token]
+    assert len(tokens) == 1
+    with Session(engine) as db:
+        current = db.get(Investigation, inv_id)
         assert current.status == "running"
-        assert current.execution_token == first_token
+        assert current.execution_token == tokens[0]
 
 
 def test_stale_takeover_fences_old_worker_token(tmp_path):
