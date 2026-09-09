@@ -1,27 +1,36 @@
 import asyncio
 import dns.asyncresolver
-import dns.exception
+
 
 async def _resolve(resolver, name, rdtype):
     try:
         answer = await resolver.resolve(name, rdtype)
-        return [r.to_text().strip('"') for r in answer]
+        return [r.to_text().strip('"') for r in answer], True
     except Exception:
-        return []
+        return [], False
+
 
 async def resolve(domain: str) -> dict:
     resolver = dns.asyncresolver.Resolver()
     resolver.lifetime = 4.0
-    keys = ["A", "AAAA", "MX", "NS", "CNAME", "TXT", "SPF", "DMARC", "DNSSEC"]
-    results = await asyncio.gather(*[
-        _resolve(resolver, domain, k) if k not in {"SPF", "DMARC", "DNSSEC"} else _resolve(resolver, f"_dmarc.{domain}" if k == "DMARC" else domain, "TXT") if k in {"SPF", "DMARC"} else _resolve(resolver, domain, "A")
-        for k in keys
-    ])
-    out = dict(zip(keys, results))
+    record_types = ["A", "AAAA", "MX", "NS", "CNAME", "TXT"]
+    results = await asyncio.gather(*[_resolve(resolver, domain, kind) for kind in record_types])
+    out = {}
+    statuses = {}
+    for kind, (values, ok) in zip(record_types, results):
+        out[kind] = values
+        statuses[kind] = "ok" if ok else "unavailable"
+
     txt = out.get("TXT", [])
     out["SPF"] = [x for x in txt if x.lower().startswith("v=spf1")]
-    out["DMARC"] = [x for x in out.get("DMARC", []) if x.lower().startswith("v=dmarc1")]
+    out["SPF_status"] = statuses["TXT"]
+
+    dmarc, dmarc_ok = await _resolve(resolver, f"_dmarc.{domain}", "TXT")
+    out["DMARC"] = [x for x in dmarc if x.lower().startswith("v=dmarc1")]
+    out["DMARC_status"] = "ok" if dmarc_ok else "unavailable"
+
     # dnspython does not expose a portable boolean from this simple resolver call;
-    # absence is therefore reported as not observed rather than definitive failure.
+    # absence is therefore reported as unknown rather than a definitive failure.
     out["DNSSEC"] = []
+    out["DNSSEC_status"] = "unknown"
     return out
