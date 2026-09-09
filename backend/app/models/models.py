@@ -17,24 +17,34 @@ class Investigation(Base):
     risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     privacy_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    external_provider_disclosure: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     execution_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    # Stable logical investigation/acquisition identity. It survives recovery.
     execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True, default=lambda: str(uuid.uuid4()))
-    # Identity of the currently owned worker attempt. It changes on every claim.
     execution_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+
+class ExecutionAttempt(Base):
+    __tablename__ = "execution_attempts"
+    __table_args__ = (UniqueConstraint("investigation_id", "execution_attempt_id", name="uq_execution_attempt_identity"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    execution_id: Mapped[str] = mapped_column(String(36), index=True)
+    execution_attempt_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recovery_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 class Finding(Base):
     __tablename__ = "findings"
     __table_args__ = (UniqueConstraint("investigation_id", "execution_id", "persistence_key", name="uq_findings_execution_persistence"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
-    # Logical acquisition identity used for replay idempotency.
     execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    # Worker-attempt provenance; it never participates in finding deduplication.
     execution_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     persistence_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String(120))
@@ -55,9 +65,7 @@ class ModuleRun(Base):
     __table_args__ = (UniqueConstraint("investigation_id", "execution_attempt_id", "module", name="uq_module_runs_attempt_module"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
-    # Logical acquisition identity retained for forensic grouping.
     execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    # Unique worker-attempt identity; this distinguishes A from recovered B.
     execution_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     module: Mapped[str] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(24), default="queued")
