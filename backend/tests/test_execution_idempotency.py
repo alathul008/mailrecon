@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
 from app.db.session import Base
@@ -70,7 +70,7 @@ def test_recovery_reuses_execution_identity_and_does_not_duplicate_findings(tmp_
             "notes": "Evidence state: possible_match.",
             "raw_reference": None,
         }], token)
-        before = db.scalar(select(Finding).where(Finding.investigation_id == inv.id).with_only_columns(Finding.id))
+        before = db.scalar(select(Finding.id).where(Finding.investigation_id == inv.id))
         assert before
 
         assert lifecycle.recover_stale_investigations(db, now=now) == 1
@@ -186,5 +186,5 @@ def test_persistence_key_is_scoped_to_execution_not_global(tmp_path):
         }], token)
         duplicate = db.scalar(select(Finding).where(Finding.investigation_id == first.id))
         assert duplicate.persistence_key
-        indexes = db.execute(text("PRAGMA index_list(findings)")).all()
-        assert any("uq_findings_execution_persistence" in str(row) for row in indexes)
+        unique_constraints = inspect(engine).get_unique_constraints("findings")
+        assert any(c["name"] == "uq_findings_execution_persistence" for c in unique_constraints)
