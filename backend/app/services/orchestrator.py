@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
-from app.osint.email import analyze_email, username_candidates
+from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED
 from app.osint.dns import resolve
 from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, RDAPProvider
 from app.providers.ollama import OllamaProvider
@@ -30,6 +30,9 @@ def add_findings(db,inv_id,fs):
         if inv and inv.privacy_mode:
             f=dict(f)
             f["raw_reference"]=None
+            # Weak third-party correlations are not retained in privacy mode.
+            if f.get("finding_type") == "profile_candidate" and EVIDENCE_POSSIBLE in (f.get("notes") or ""):
+                continue
         db.add(Finding(investigation_id=inv_id,**f))
     db.commit()
 
@@ -45,6 +48,23 @@ async def run_providers(email: str, domain: str, candidates: list[str]):
     providers=[GravatarProvider().run(email), RDAPProvider().run(domain), GitHubProvider().run(candidates,email), HIBPProvider().run(email)]
     return await asyncio.gather(*providers,return_exceptions=True)
 
+def _finding_evidence_state(row):
+    notes=row.notes or ""
+    marker="Evidence state: "
+    if marker in notes:
+        return notes.split(marker,1)[1].split(".",1)[0].strip()
+    return None
+
+def _rdap_domain_consistency(domain, result):
+    if isinstance(result,Exception) or getattr(result,"status",None) != "ok":
+        return None
+    observed=[f.get("value","").split(": ",1)[1] for f in result.findings if f.get("finding_type")=="domain" and isinstance(f.get("value"),str) and f["value"].startswith("ldhName: ")]
+    if not observed:
+        return None
+    if observed[0].lower().rstrip(".") == domain.lower().rstrip("."):
+        return finding("MailRecon","domain_correlation","DNS/RDAP domain match",1.0,"info",notes="Explicit comparison of normalized investigation domain with RDAP ldhName.")
+    return finding("MailRecon","domain_correlation",f"DNS/RDAP domain mismatch: {observed[0]}",1.0,"warning",notes="RDAP returned a domain different from the normalized investigation domain; this is a consistency warning, not an identity assertion.")
+
 async def run_investigation(inv_id:int):
     with SessionLocal() as db:
         inv=db.get(Investigation,inv_id)
@@ -54,23 +74,27 @@ async def run_investigation(inv_id:int):
             analysis=analyze_email(inv.target)
             inv.normalized_email=analysis["email"]; inv.username=analysis["username"]; inv.domain=analysis["domain"]; inv.status="running"; db.commit()
             add_findings(db,inv_id,[
-                finding("MailRecon","email",analysis["email"],1.0,"info",notes="Normalized and syntax-validated target."),
-                finding("MailRecon","classification",f"provider={analysis['provider']}; type={'Disposable' if analysis['disposable'] else 'Role-based' if analysis['role_based'] else 'Personal/Business unknown'}",0.95,"info",notes="Classification, not an identity verdict."),
+                finding("MailRecon","email",analysis["email"],1.0,"info",notes="Normalized and syntax-validated target. Evidence state: observed."),
+                finding("MailRecon","classification",f"provider={analysis['provider']}; type={'Disposable' if analysis['disposable'] else 'Role-based' if analysis['role_based'] else 'Personal/Business unknown'}",0.95,"info",notes="Classification, not an identity verdict. Evidence state: observed."),
             ])
             set_module(db,inv_id,"email_validation","completed","Validated and normalized")
 
             set_module(db,inv_id,"username_extraction","running")
             candidates=username_candidates(analysis["username"])
-            add_findings(db,inv_id,[finding("MailRecon","username_candidate",c,0.7,"info",notes="Generated from email local-part; not proof of account ownership.") for c in candidates])
+            add_findings(db,inv_id,[finding("MailRecon","username_candidate",c,0.0,"info",notes=f"Evidence state: {EVIDENCE_DERIVED}. Generated from email local-part; hypothesis only, not proof of account ownership.") for c in candidates])
             set_module(db,inv_id,"username_extraction","completed",f"Generated {len(candidates)} candidates")
 
             set_module(db,inv_id,"dns_analysis","running")
             dns=await resolve(inv.domain)
-            analysis["has_dmarc"]=bool(dns.get("DMARC")); analysis["has_spf"]=bool(dns.get("SPF")); analysis["dnssec"]=bool(dns.get("DNSSEC"))
+            analysis["has_dmarc"]=True if dns.get("DMARC") else False if dns.get("DMARC") is not None else None
+            analysis["has_spf"]=True if dns.get("SPF") else False if dns.get("SPF") is not None else None
+            dnssec=dns.get("DNSSEC")
+            analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
             fs=[]
             for k in ["A","AAAA","MX","NS","CNAME","SPF","DMARC"]:
-                if dns.get(k): fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),0.99,"info",notes="Public DNS response."))
-            fs.append(finding("DNS","dnssec","enabled" if dns.get("DNSSEC") else "not observed",0.95,"info",notes="Absence is not proof of misconfiguration."))
+                if dns.get(k): fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),0.99,"info",notes="Public DNS response. Evidence state: observed."))
+            dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown"
+            fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure."))
             add_findings(db,inv_id,fs)
             set_module(db,inv_id,"dns_analysis","completed","DNS analysis complete")
             set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP")
@@ -87,9 +111,12 @@ async def run_investigation(inv_id:int):
                     module_status="completed" if res.status in {"ok","unconfigured","rate_limited","unavailable"} else "failed"
                     set_module(db,inv_id,name,module_status,res.message)
 
+            consistency=_rdap_domain_consistency(analysis["domain"],results[1])
+            if consistency: add_findings(db,inv_id,[consistency])
+
             set_module(db,inv_id,"risk_calculation","running")
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id)).all()
-            risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value} for r in rows])
+            risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value,"notes":r.notes,"raw_reference":r.raw_reference} for r in rows])
             inv.risk_score=risk.score; inv.risk_level=risk.level; db.commit()
             add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_factor",f["reason"],1.0,"high" if f["delta"]>10 else "medium" if f["delta"]>0 else "info",notes=f"Score delta: {f['delta']:+d}; dimension={f['dimension']}") for f in risk.factors])
             add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_dimension",f"{k}={v}",1.0,"info",notes="Dimension score, not a probability of compromise.") for k,v in risk.dimensions.items()])
@@ -99,7 +126,6 @@ async def run_investigation(inv_id:int):
             if ai_summary: add_findings(db,inv_id,[finding("Ollama","ai_summary",ai_summary,0.6,"info",notes="Evidence-grounded local summary; review source findings before relying on it.")])
 
             set_module(db,inv_id,"graph_build","running")
-            # Rebuild graph deterministically to avoid duplicate nodes on retries.
             db.query(GraphEdge).filter(GraphEdge.investigation_id==inv_id).delete(synchronize_session=False)
             db.query(GraphNode).filter(GraphNode.investigation_id==inv_id).delete(synchronize_session=False)
             email_node=GraphNode(investigation_id=inv_id,node_key=f"email:{analysis['email']}",node_type="EMAIL",label=analysis['email'])
@@ -108,20 +134,28 @@ async def run_investigation(inv_id:int):
             db.add_all([email_node,domain_node,user_node]); db.flush()
             db.add_all([
                 GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=domain_node.node_key,relation="uses",confidence=1),
-                GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation="registered_as",confidence=.95),
+                GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation="registered_as",confidence=1),
             ])
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id)).all()
             seen=set()
             for r in rows:
+                state=_finding_evidence_state(r)
                 if r.finding_type in {"breach","profile_candidate","public_identity","profile"}:
                     typ={"breach":"BREACH","profile_candidate":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE"}[r.finding_type]
                     key=f"{typ.lower()}:{r.value}"
                     if key in seen: continue
                     seen.add(key)
-                    db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value))
-                    relation="appeared_in" if typ=="BREACH" else "possible_profile" if typ=="PROFILE" else "associated_identity"
+                    db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence}))
+                    if typ=="BREACH":
+                        relation="historical_breach_exposure"
+                    elif state==EVIDENCE_CORROBORATED:
+                        relation="corroborated_profile"
+                    elif state==EVIDENCE_SOURCE_ASSOCIATED:
+                        relation="source_associated_identity"
+                    else:
+                        relation="possible_profile"
                     db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=relation,confidence=r.confidence))
-            db.commit(); set_module(db,inv_id,"graph_build","completed","Relationship graph built")
+            db.commit(); set_module(db,inv_id,"graph_build","completed","Relationship graph built with evidence-state-aware relationships")
             inv.status="completed"; inv.completed_at=utcnow(); db.commit()
         except Exception as exc:
             inv.status="failed"; db.commit()
