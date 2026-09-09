@@ -299,7 +299,7 @@ def test_stale_attempt_modules_are_abandoned_without_losing_provenance(tmp_path)
         assert db.get(ModuleRun, completed.id).status == "completed"
         assert db.get(ModuleRun, running.id).execution_id == first_execution_id
         assert db.get(ModuleRun, running.id).execution_attempt_id == first_attempt_id
-        assert db.get(ModuleRun, running.id).started_at == old
+        assert db.get(ModuleRun, running.id).started_at.replace(tzinfo=timezone.utc) == old
         assert db.get(ModuleRun, other_attempt.id).status == "running"
 
         second_token = lifecycle.claim_investigation(db, inv.id, now=now + timedelta(seconds=1))
