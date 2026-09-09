@@ -30,7 +30,6 @@ def add_findings(db,inv_id,fs):
         if inv and inv.privacy_mode:
             f=dict(f)
             f["raw_reference"]=None
-            # Weak third-party correlations are not retained in privacy mode.
             if f.get("finding_type") == "profile_candidate" and EVIDENCE_POSSIBLE in (f.get("notes") or ""):
                 continue
         db.add(Finding(investigation_id=inv_id,**f))
@@ -38,11 +37,7 @@ def add_findings(db,inv_id,fs):
 
 def provider_finding(result):
     severity = "warning" if result.status in {"error","rate_limited","unavailable"} else "info"
-    return finding(
-        result.provider, "provider_status", result.status, 1.0, severity,
-        notes=result.message or "Provider execution completed.",
-        raw_reference={"status": result.status},
-    )
+    return finding(result.provider, "provider_status", result.status, 1.0, severity, notes=result.message or "Provider execution completed.", raw_reference={"status": result.status})
 
 async def run_providers(email: str, domain: str, candidates: list[str]):
     providers=[GravatarProvider().run(email), RDAPProvider().run(domain), GitHubProvider().run(candidates,email), HIBPProvider().run(email)]
@@ -56,14 +51,19 @@ def _finding_evidence_state(row):
     return None
 
 def _rdap_domain_consistency(domain, result):
-    if isinstance(result,Exception) or getattr(result,"status",None) != "ok":
-        return None
+    if isinstance(result,Exception) or getattr(result,"status",None) != "ok": return None
     observed=[f.get("value","").split(": ",1)[1] for f in result.findings if f.get("finding_type")=="domain" and isinstance(f.get("value"),str) and f["value"].startswith("ldhName: ")]
-    if not observed:
-        return None
+    if not observed: return None
     if observed[0].lower().rstrip(".") == domain.lower().rstrip("."):
         return finding("MailRecon","domain_correlation","DNS/RDAP domain match",1.0,"info",notes="Explicit comparison of normalized investigation domain with RDAP ldhName.")
     return finding("MailRecon","domain_correlation",f"DNS/RDAP domain mismatch: {observed[0]}",1.0,"warning",notes="RDAP returned a domain different from the normalized investigation domain; this is a consistency warning, not an identity assertion.")
+
+def _graph_relation(finding_type, evidence_state):
+    """Map evidence semantics to an explicit graph relation; never infer confirmation from confidence."""
+    if finding_type == "breach": return "historical_breach_exposure"
+    if evidence_state == EVIDENCE_CORROBORATED: return "corroborated_profile"
+    if evidence_state == EVIDENCE_SOURCE_ASSOCIATED: return "source_associated_identity"
+    return "possible_profile"
 
 async def run_investigation(inv_id:int):
     with SessionLocal() as db:
@@ -146,15 +146,7 @@ async def run_investigation(inv_id:int):
                     if key in seen: continue
                     seen.add(key)
                     db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence}))
-                    if typ=="BREACH":
-                        relation="historical_breach_exposure"
-                    elif state==EVIDENCE_CORROBORATED:
-                        relation="corroborated_profile"
-                    elif state==EVIDENCE_SOURCE_ASSOCIATED:
-                        relation="source_associated_identity"
-                    else:
-                        relation="possible_profile"
-                    db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=relation,confidence=r.confidence))
+                    db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=_graph_relation(r.finding_type,state),confidence=r.confidence))
             db.commit(); set_module(db,inv_id,"graph_build","completed","Relationship graph built with evidence-state-aware relationships")
             inv.status="completed"; inv.completed_at=utcnow(); db.commit()
         except Exception as exc:
