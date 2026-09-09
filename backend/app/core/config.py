@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     api_key: str | None = None
     max_concurrency: int = 8
     max_queue_depth: int = 100
+    max_investigations_per_window: int = 10
+    investigation_rate_window_seconds: float = 60.0
     request_timeout_seconds: float = 10.0
     execution_lease_seconds: int = 60
     worker_poll_interval_seconds: float = 0.5
