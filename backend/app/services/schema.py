@@ -31,6 +31,12 @@ REQUIRED_EXECUTION_FOREIGN_KEYS = {
     "module_runs": {"fk_module_runs_execution_attempt_investigation": ("execution_attempts", ("investigation_id", "execution_attempt_id"), ("investigation_id", "execution_attempt_id"))},
 }
 
+SQLITE_INVESTIGATION_ATTEMPT_TRIGGERS = {
+    "trg_investigations_current_attempt_guard_insert",
+    "trg_investigations_current_attempt_guard_update",
+    "trg_execution_attempts_current_investigation_guard_delete",
+}
+
 REQUIRED_GRAPH_UNIQUENESS = {
     "graph_nodes": {"uq_graph_nodes_investigation_node_key": ("investigation_id", "node_key")},
     "graph_edges": {"uq_graph_edges_investigation_identity": ("investigation_id", "source", "target", "relation")},
@@ -68,10 +74,15 @@ def _validate_physical_schema() -> None:
     if missing_or_drifted: raise RuntimeError(f"Database execution indexes diverge from Alembic contract: {sorted(missing_or_drifted)}")
     foreign_key_drift = []
     for table_name, constraints in REQUIRED_EXECUTION_FOREIGN_KEYS.items():
-        actual = {fk["name"]: (fk["referred_table"], tuple(fk["constrained_columns"]), tuple(fk["referred_columns"])) for fk in inspect(engine).get_foreign_keys(table_name)}
+        actual = {fk["name"]: (fk["referred_table"], tuple(fk["constrained_columns"]), tuple(fk["referred_columns"])) for fk in inspector.get_foreign_keys(table_name)}
         for name, expected in constraints.items():
+            if table_name == "investigations" and inspector.bind.dialect.name == "sqlite": continue
             if actual.get(name) != expected: foreign_key_drift.append(name)
     if foreign_key_drift: raise RuntimeError(f"Database execution foreign keys diverge from Alembic contract: {sorted(foreign_key_drift)}")
+    if inspector.bind.dialect.name == "sqlite":
+        actual_triggers = {row[0] for row in engine.connect().execute(__import__('sqlalchemy').text("SELECT name FROM sqlite_master WHERE type='trigger'")).fetchall()}
+        missing_triggers = SQLITE_INVESTIGATION_ATTEMPT_TRIGGERS - actual_triggers
+        if missing_triggers: raise RuntimeError(f"Database SQLite execution-attempt guards diverge from Alembic contract: {sorted(missing_triggers)}")
     graph_constraints = {table: {item["name"]: tuple(item["column_names"]) for item in inspect(engine).get_unique_constraints(table)} for table in REQUIRED_GRAPH_UNIQUENESS}
     graph_drift = []
     for table_name, constraints in REQUIRED_GRAPH_UNIQUENESS.items():
