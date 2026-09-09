@@ -32,7 +32,8 @@ def test_runtime_schema_bootstrap_reaches_head_and_detects_physical_drift(tmp_pa
     try:
         schema.ensure_schema()
         with engine.connect() as conn: assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0008"
-        with engine.begin() as conn: conn.execute(text("DROP INDEX ix_investigations_execution_attempt_id")); conn.execute(text("ALTER TABLE investigations DROP COLUMN execution_attempt_id"))
+        with engine.begin() as conn:
+            conn.execute(text("DROP TRIGGER trg_investigations_current_attempt_guard_insert")); conn.execute(text("DROP TRIGGER trg_investigations_current_attempt_guard_update")); conn.execute(text("DROP TRIGGER trg_execution_attempts_current_investigation_guard_delete")); conn.execute(text("DROP INDEX ix_investigations_execution_attempt_id")); conn.execute(text("ALTER TABLE investigations DROP COLUMN execution_attempt_id"))
         with pytest.raises(RuntimeError,match="columns diverge"): schema.ensure_schema()
     finally: settings.database_url=old_url
 
