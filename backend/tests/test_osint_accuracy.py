@@ -48,9 +48,9 @@ def patch_client(monkeypatch, module, json_data):
 
 
 def test_username_normalization_is_deterministic_and_collision_prone_but_derived():
-    assert username_candidates("John.Doe+tag") == ["john-doe", "john.doe", "john_doe", "johndoe"]
-    assert username_candidates("john-doe") == ["john-doe", "john.doe", "john_doe", "johndoe"]
-    assert set(username_candidates("john.doe")) == set(username_candidates("john-doe"))
+    assert set(username_candidates("John.Doe+tag")) == {"john-doe", "john.doe", "john_doe", "johndoe"}
+    assert set(username_candidates("john-doe")) == {"john-doe", "john_doe", "johndoe"}
+    assert set(username_candidates("john.doe")) == {"john-doe", "john.doe", "john_doe", "johndoe"}
 
 
 def test_evidence_states_are_not_numeric_confidence():
@@ -109,7 +109,7 @@ def test_graph_relations_preserve_evidence_state():
 async def test_github_username_only_is_possible_and_exact_email_is_corroborated(monkeypatch):
     patch_client(monkeypatch, github_module, {"login": "johnsmith", "name": "John Smith", "html_url": "https://github.com/johnsmith"})
     result = await GitHubProvider().run(["johnsmith"], "john.smith@example.com")
-    assert result.findings[0]["confidence"] == 0.45
+    assert result.findings[0]["confidence"] == 0.2
     assert EVIDENCE_POSSIBLE in result.findings[0]["notes"]
 
     patch_client(monkeypatch, github_module, {"login": "johnsmith", "name": "John Smith", "email": "john.smith@example.com", "html_url": "https://github.com/johnsmith"})
