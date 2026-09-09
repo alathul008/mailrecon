@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     api_key: str | None = None
     max_concurrency: int = 8
     request_timeout_seconds: float = 10.0
+    execution_lease_seconds: int = 60
+    worker_poll_interval_seconds: float = 0.5
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 @lru_cache

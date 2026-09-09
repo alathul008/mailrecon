@@ -2,17 +2,44 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import inspect, text
 from app.core.config import get_settings
 from app.db.session import engine, Base
 from app.api.routes import router
+from app.services.lifecycle import worker_loop
+import asyncio
 import os
 
 settings=get_settings()
+
+
+def ensure_execution_schema():
+    """Add Phase 6 execution columns to pre-migration local SQLite databases."""
+    inspector=inspect(engine)
+    columns={column["name"] for column in inspector.get_columns("investigations")}
+    missing={
+        "execution_token": "VARCHAR(64)",
+        "execution_started_at": "DATETIME",
+        "execution_heartbeat_at": "DATETIME",
+    }
+    with engine.begin() as connection:
+        for name, column_type in missing.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE investigations ADD COLUMN {name} {column_type}"))
+
+
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     os.makedirs("data",exist_ok=True)
     Base.metadata.create_all(engine)
-    yield
+    ensure_execution_schema()
+    stop_event=asyncio.Event()
+    worker=asyncio.create_task(worker_loop(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        await worker
 
 app=FastAPI(title="MailRecon API",version="1.0.0",description="Local-first defensive email intelligence platform",lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],allow_credentials=True,allow_methods=["GET","POST","DELETE"],allow_headers=["*"])
