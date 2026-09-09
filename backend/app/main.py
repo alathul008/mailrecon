@@ -5,7 +5,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from app.core.config import get_settings
 from app.api.routes import router
-from app.api.deletion import router as deletion_router
 from app.services.lifecycle import worker_loop
 from app.services.schema import ensure_schema
 import asyncio
@@ -31,7 +30,6 @@ app=FastAPI(title="MailRecon API",version="1.0.0",description="Local-first defen
 app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_SIZE)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],allow_credentials=True,allow_methods=["GET","POST","DELETE"],allow_headers=["*"])
 app.include_router(router)
-app.include_router(deletion_router)
 if os.path.isdir("/app/frontend/dist"):
     app.mount("/",StaticFiles(directory="/app/frontend/dist",html=True),name="frontend")
 
