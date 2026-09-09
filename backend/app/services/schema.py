@@ -26,6 +26,7 @@ REQUIRED_EXECUTION_INDEXES = {
 }
 
 REQUIRED_EXECUTION_FOREIGN_KEYS = {
+    "investigations": {"fk_investigations_execution_attempt_investigation": ("execution_attempts", ("id", "execution_attempt_id"), ("investigation_id", "execution_attempt_id"))},
     "findings": {"fk_findings_execution_attempt_investigation": ("execution_attempts", ("investigation_id", "execution_attempt_id"), ("investigation_id", "execution_attempt_id"))},
     "module_runs": {"fk_module_runs_execution_attempt_investigation": ("execution_attempts", ("investigation_id", "execution_attempt_id"), ("investigation_id", "execution_attempt_id"))},
 }
