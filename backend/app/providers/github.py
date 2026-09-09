@@ -15,7 +15,7 @@ class GitHubProvider:
             headers["authorization"] = f"Bearer {settings.github_token}"
         findings = []
         try:
-            async with httpx.AsyncClient(timeout=10.0, headers=headers, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, headers=headers, follow_redirects=False) as client:
                 for username in candidates[:8]:
                     url = f"https://api.github.com/users/{username}"
                     validate_provider_url(url)
