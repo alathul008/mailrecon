@@ -1,0 +1,21 @@
+name: phase16-lockgen
+on:
+  push:
+    branches:
+      - security/phase16-hardening
+permissions:
+  contents: write
+jobs:
+  restore-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Restore existing Phase 15 dependency lock
+        run: |
+          git show d30976868738109b38303a33f327d6ea9e53e106:backend/requirements.lock > backend/requirements.lock
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/requirements.lock
+          git diff --cached --quiet || (git commit -m 'Phase 16: preserve existing resolved dependency lock' && git push origin HEAD:security/phase16-hardening)
