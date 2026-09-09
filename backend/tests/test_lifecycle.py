@@ -14,6 +14,7 @@ from app.services.orchestrator import mark_investigation_failed
 
 def make_engine(tmp_path):
     db_engine = create_engine(f"sqlite:///{tmp_path / 'lifecycle.db'}")
+    event.listen(db_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
     Base.metadata.create_all(db_engine)
     return db_engine
 
@@ -153,7 +154,6 @@ async def test_configured_concurrency_is_respected(tmp_path, monkeypatch):
 
 def test_delete_queued_investigation(tmp_path):
     db_engine = make_engine(tmp_path)
-    event.listen(db_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
     with Session(db_engine) as db:
         inv = add_investigation(db)
         db.add_all([
@@ -195,9 +195,7 @@ def test_sqlite_foreign_keys_are_enabled_for_application_engine():
 
 
 def test_delete_cascades_all_investigation_children(tmp_path):
-    db_engine = create_engine(f"sqlite:///{tmp_path / 'cascade.db'}")
-    event.listen(db_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
-    Base.metadata.create_all(db_engine)
+    db_engine = make_engine(tmp_path)
     with Session(db_engine) as db:
         inv = add_investigation(db)
         db.add_all([
