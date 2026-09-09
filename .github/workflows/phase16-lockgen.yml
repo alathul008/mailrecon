@@ -4,7 +4,7 @@ on:
     branches:
       - security/phase16-hardening
 permissions:
-  contents: read
+  contents: write
 jobs:
   lockgen:
     runs-on: ubuntu-latest
@@ -16,5 +16,11 @@ jobs:
       - name: Generate hash lock
         run: |
           python -m pip install --disable-pip-version-check pip-tools==7.6.1
-          pip-compile --generate-hashes --no-upgrade --output-file /tmp/requirements.lock backend/requirements.txt
-          cat /tmp/requirements.lock
+          pip-compile --generate-hashes --no-upgrade --output-file backend/requirements.lock backend/requirements.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/requirements.lock
+          if ! git diff --cached --quiet; then
+            git commit -m 'Phase 16: generate hash-locked Python dependencies'
+            git push origin HEAD:security/phase16-hardening
+          fi
