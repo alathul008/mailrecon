@@ -2,7 +2,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi import HTTPException
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 
 from app.api.routes import csv_safe, create
@@ -76,11 +76,9 @@ def test_runtime_schema_rejects_missing_execution_integrity_index(tmp_path, monk
         with engine.begin() as conn:
             conn.execute(text("DROP INDEX uq_module_runs_attempt_module"))
 
-        with engine.connect() as conn:
-            assert "execution_attempt_id" in {
-                column["name"] for column in schema.inspect(engine).get_columns("module_runs")
-            }
-
+        assert "execution_attempt_id" in {
+            column["name"] for column in inspect(engine).get_columns("module_runs")
+        }
         with pytest.raises(RuntimeError, match="execution indexes diverge"):
             schema.ensure_schema()
     finally:
