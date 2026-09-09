@@ -13,7 +13,6 @@ class Investigation(Base):
             ["id", "execution_attempt_id"],
             ["execution_attempts.investigation_id", "execution_attempts.execution_attempt_id"],
             name="fk_investigations_execution_attempt_investigation",
-            ondelete="SET NULL",
         ),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
