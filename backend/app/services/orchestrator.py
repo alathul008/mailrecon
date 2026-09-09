@@ -13,7 +13,7 @@ from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, RDAPPr
 from app.providers.ollama import OllamaProvider
 from app.providers.base import finding
 from app.risk.engine import calculate
-from app.services.lifecycle import execution_is_owned, heartbeat_investigation
+from app.services.lifecycle import execution_is_owned, fence_execution, heartbeat_investigation
 
 MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","breach_sources","risk_calculation","graph_build"]
 DERIVED_USERNAME_RELATION = "derived_username"
@@ -28,23 +28,8 @@ def _require_ownership(db, inv_id, token):
 
 
 def _capture_owned_execution(db, inv_id, token):
-    """Capture the logical and attempt identities owned by this worker token."""
-    row=db.execute(select(
-        Investigation.execution_id,
-        Investigation.execution_attempt_id,
-    ).where(
-        Investigation.id==inv_id,
-        Investigation.status=="running",
-        Investigation.execution_token==token,
-    )).one_or_none()
-    if row is None:
-        raise RuntimeError("Investigation execution lease is no longer owned")
-    execution_id, execution_attempt_id=row
-    if not execution_id:
-        raise RuntimeError("Investigation has no durable logical execution identity")
-    if not execution_attempt_id:
-        raise RuntimeError("Investigation has no durable execution-attempt provenance")
-    return execution_id, execution_attempt_id
+    """Fence the worker token before returning execution provenance for a mutation."""
+    return fence_execution(db, inv_id, token)
 
 
 def _persistence_key(f):
@@ -198,23 +183,23 @@ async def _heartbeat_loop(inv_id, token, stop_event):
 
 
 def mark_investigation_failed(db, inv_id, token, exc):
-    if not execution_is_owned(db,inv_id,token):
+    try:
+        execution_id, execution_attempt_id = fence_execution(db, inv_id, token)
+    except RuntimeError:
         return False
     inv=db.get(Investigation,inv_id)
-    if not inv:
-        return False
+    if not inv: return False
     inv.status="failed"; inv.completed_at=None; inv.execution_token=None; inv.execution_heartbeat_at=None
-    db.commit()
     for m in db.scalars(select(ModuleRun).where(
         ModuleRun.investigation_id==inv_id,
         or_(
-            ModuleRun.execution_attempt_id==inv.execution_attempt_id,
+            ModuleRun.execution_attempt_id==execution_attempt_id,
             ModuleRun.execution_attempt_id.is_(None),
         ),
     )).all():
         if m.execution_attempt_id is None:
-            m.execution_attempt_id=inv.execution_attempt_id
-            m.execution_id=inv.execution_id
+            m.execution_attempt_id=execution_attempt_id
+            m.execution_id=execution_id
         if m.status == "running":
             m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
         elif m.status == "queued":
@@ -233,7 +218,7 @@ async def run_investigation(inv_id:int, token:str):
             if not inv: return
             set_module(db,inv_id,"email_validation","running",token=token)
             analysis=analyze_email(inv.target)
-            _require_ownership(db,inv_id,token)
+            execution_id, execution_attempt_id = _capture_owned_execution(db,inv_id,token)
             inv.normalized_email=analysis["email"]; inv.username=analysis["username"]; inv.domain=analysis["domain"]; db.commit()
             add_findings(db,inv_id,[
                 finding("MailRecon","email",analysis["email"],1.0,"info",notes=f"Normalized and syntax-validated target. Evidence state: {EVIDENCE_OBSERVED}."),
@@ -249,8 +234,8 @@ async def run_investigation(inv_id:int, token:str):
             set_module(db,inv_id,"dns_analysis","running",token=token)
             dns=await resolve(inv.domain)
             _require_ownership(db,inv_id,token)
-            analysis["has_dmarc"]=True if dns.get("DMARC") else False if dns.get("DMARC") is not None else None
-            analysis["has_spf"]=True if dns.get("SPF") else False if dns.get("SPF") is not None else None
+            analysis["has_dmarc"]=dns.get("has_dmarc")
+            analysis["has_spf"]=dns.get("has_spf")
             dnssec=dns.get("DNSSEC")
             analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
             fs=[]
@@ -281,7 +266,7 @@ async def run_investigation(inv_id:int, token:str):
             set_module(db,inv_id,"risk_calculation","running",token=token)
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id)).all()
             risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value,"notes":r.notes,"raw_reference":r.raw_reference} for r in rows])
-            _require_ownership(db,inv_id,token)
+            _capture_owned_execution(db,inv_id,token)
             inv.risk_score=risk.score; inv.risk_level=risk.level; db.commit()
             add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_factor",f["reason"],1.0,"high" if f["delta"]>10 else "medium" if f["delta"]>0 else "info",notes=f"Score delta: {f['delta']:+d}; dimension={f['dimension']}") for f in risk.factors],token)
             add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_dimension",f"{k}={v}",1.0,"info",notes="Dimension score, not a probability of compromise.") for k,v in risk.dimensions.items()],token)
@@ -291,6 +276,7 @@ async def run_investigation(inv_id:int, token:str):
             if ai_summary: add_findings(db,inv_id,[finding("Ollama","ai_summary",ai_summary,0.6,"info",notes="Evidence-grounded local summary; review source findings before relying on it.")],token)
 
             set_module(db,inv_id,"graph_build","running",token=token)
+            _capture_owned_execution(db,inv_id,token)
             db.query(GraphEdge).filter(GraphEdge.investigation_id==inv_id).delete(synchronize_session=False)
             db.query(GraphNode).filter(GraphNode.investigation_id==inv_id).delete(synchronize_session=False)
             email_node=GraphNode(investigation_id=inv_id,node_key=f"email:{analysis['email']}",node_type="EMAIL",label=analysis['email'])
@@ -312,7 +298,7 @@ async def run_investigation(inv_id:int, token:str):
                     seen.add(key)
                     db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence}))
                     db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=_graph_relation(r.finding_type,state),confidence=r.confidence))
-            _require_ownership(db,inv_id,token)
+            _capture_owned_execution(db,inv_id,token)
             db.commit(); set_module(db,inv_id,"graph_build","completed","Relationship graph built with evidence-state-aware relationships",token)
             result=db.execute(update(Investigation).where(Investigation.id==inv_id,Investigation.status=="running",Investigation.execution_token==token).values(status="completed",completed_at=utcnow(),execution_heartbeat_at=None,execution_token=None))
             db.commit()
