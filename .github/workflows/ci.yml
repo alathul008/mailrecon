@@ -47,29 +47,30 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@977e6ceaea7361825998245d787fa3b4d6b9e5df # current verified CodeQL action commit
+      - uses: github/codeql-action/init@977e6ceaea7361825998245d787fa3b4d6b9e5df # verified CodeQL action commit
         with:
           languages: python,javascript-typescript
-      - uses: github/codeql-action/analyze@977e6ceaea7361825998245d787fa3b4d6b9e5df # current verified CodeQL action commit
+      - uses: github/codeql-action/analyze@977e6ceaea7361825998245d787fa3b4d6b9e5df # verified CodeQL action commit
   container-scan:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
       - name: Build production image
         run: docker build --pull --tag mailrecon:ci .
-      - uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          image-ref: mailrecon:ci
-          format: table
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
+      - name: Export production image
+        run: docker save mailrecon:ci --output /tmp/mailrecon.tar
+      - name: Scan production image
+        run: >-
+          docker run --rm
+          -v /tmp:/work:ro
+          -v "$HOME/.cache/trivy:/root/.cache/trivy"
+          ghcr.io/aquasecurity/trivy:0.74.0@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9
+          image --input /work/mailrecon.tar --format table --exit-code 1
+          --ignore-unfixed --vuln-type os,library --severity CRITICAL,HIGH
   workflow-security:
     runs-on: ubuntu-latest
     permissions:
