@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
@@ -334,7 +335,6 @@ def test_stale_worker_cannot_persist_under_new_attempt(tmp_path):
             "notes": "Evidence state: possible_match.",
             "raw_reference": None,
         }
-        import pytest
         with pytest.raises(RuntimeError, match="no longer owned"):
             set_module(db, inv.id, "rdap", "completed", "Attempt A stale", token_a)
         with pytest.raises(RuntimeError, match="no longer owned"):
