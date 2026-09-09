@@ -6,6 +6,7 @@ from app.db.session import Base
 from app.models import Finding, Investigation
 from app.osint.email import (
     EVIDENCE_CORROBORATED,
+    EVIDENCE_CONFIRMED,
     EVIDENCE_DERIVED,
     EVIDENCE_OBSERVED,
     EVIDENCE_POSSIBLE,
@@ -62,7 +63,7 @@ def test_evidence_taxonomy_is_explicit_and_consistent():
         EVIDENCE_CORROBORATED,
         EVIDENCE_SOURCE_ASSOCIATED,
         EVIDENCE_OBSERVED,
-        "confirmed",
+        EVIDENCE_CONFIRMED,
     }
     rows = [
         {"notes": f"Evidence state: {EVIDENCE_DERIVED}. hypothesis only", "confidence": 0.0},
@@ -70,8 +71,9 @@ def test_evidence_taxonomy_is_explicit_and_consistent():
         {"notes": f"Evidence state: {EVIDENCE_CORROBORATED}. exact public email", "confidence": 0.95},
         {"notes": f"Evidence state: {EVIDENCE_SOURCE_ASSOCIATED}. source association", "confidence": 0.99},
         {"notes": f"Evidence state: {EVIDENCE_OBSERVED}. factual observation", "confidence": 1.0},
+        {"notes": f"Evidence state: {EVIDENCE_CONFIRMED}. explicit confirmation only", "confidence": 1.0},
     ]
-    assert [_finding_evidence_state(type("Row", (), row)()) for row in rows] == [EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED]
+    assert [_finding_evidence_state(type("Row", (), row)()) for row in rows] == [EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED, EVIDENCE_CONFIRMED]
 
 
 def test_evidence_states_are_not_numeric_confidence():
