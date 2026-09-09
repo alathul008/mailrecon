@@ -2,15 +2,43 @@ from sqlalchemy import create_engine, inspect, text
 from alembic import command
 from alembic.config import Config
 
+
 def migration_config(db_path):
     cfg=Config(); cfg.set_main_option("script_location","backend/alembic"); cfg.set_main_option("sqlalchemy.url",f"sqlite:///{db_path}"); return cfg
+
 
 def test_phase7_migration_upgrades_legacy_schema_and_downgrades_cleanly(tmp_path):
     db_path=tmp_path/"migration.db"; cfg=migration_config(db_path); command.upgrade(cfg,"0001"); engine=create_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, created_at) VALUES ('legacy@example.com', 'legacy@example.com', 'legacy', 'example.com', 'queued', 0, CURRENT_TIMESTAMP)")); investigation_id=conn.execute(text("SELECT id FROM investigations")).scalar_one(); conn.execute(text("INSERT INTO findings (investigation_id, source, finding_type, value, confidence, severity, collected_at) VALUES (:id, 'legacy', 'email', 'legacy@example.com', 1.0, 'info', CURRENT_TIMESTAMP)"),{"id":investigation_id}); conn.execute(text("INSERT INTO module_runs (investigation_id, module, status) VALUES (:id, 'email_validation', 'queued')"),{"id":investigation_id})
-    command.upgrade(cfg,"head"); inspector=inspect(engine); investigation_columns={c["name"] for c in inspector.get_columns("investigations")}; finding_columns={c["name"] for c in inspector.get_columns("findings")}; module_columns={c["name"] for c in inspector.get_columns("module_runs")}
-    assert {"execution_id","execution_attempt_id"} <= investigation_columns; assert {"execution_id","execution_attempt_id","persistence_key","evidence_state"} <= finding_columns; assert {"execution_id","execution_attempt_id"} <= module_columns; assert "execution_attempts" in inspector.get_table_names(); assert "uq_graph_nodes_investigation_node_key" in {c["name"] for c in inspector.get_unique_constraints("graph_nodes")}; assert "uq_graph_edges_investigation_identity" in {c["name"] for c in inspector.get_unique_constraints("graph_edges")}; assert "fk_findings_execution_attempt_investigation" in {c["name"] for c in inspector.get_foreign_keys("findings")}; assert "fk_module_runs_execution_attempt_investigation" in {c["name"] for c in inspector.get_foreign_keys("module_runs")}
+    command.upgrade(cfg,"head")
+    inspector=inspect(engine)
+    investigation_columns={c["name"] for c in inspector.get_columns("investigations")}
+    finding_columns={c["name"] for c in inspector.get_columns("findings")}
+    module_columns={c["name"] for c in inspector.get_columns("module_runs")}
+    assert {"execution_id","execution_attempt_id"} <= investigation_columns
+    assert {"execution_id","execution_attempt_id","persistence_key","evidence_state"} <= finding_columns
+    assert {"execution_id","execution_attempt_id"} <= module_columns
+    assert "execution_attempts" in inspector.get_table_names()
+    assert "uq_graph_nodes_investigation_node_key" in {c["name"] for c in inspector.get_unique_constraints("graph_nodes")}
+    assert "uq_graph_edges_investigation_identity" in {c["name"] for c in inspector.get_unique_constraints("graph_edges")}
+    assert "fk_findings_execution_attempt_investigation" in {c["name"] for c in inspector.get_foreign_keys("findings")}
+    assert "fk_module_runs_execution_attempt_investigation" in {c["name"] for c in inspector.get_foreign_keys("module_runs")}
     with engine.connect() as conn:
-        execution_id=conn.execute(text("SELECT execution_id FROM investigations WHERE id=:id"),{"id":investigation_id}).scalar_one(); assert execution_id; assert conn.execute(text("SELECT execution_id FROM findings WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one()==execution_id; assert conn.execute(text("SELECT execution_id FROM module_runs WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one()==execution_id; assert conn.execute(text("SELECT execution_attempt_id FROM investigations WHERE id=:id"),{"id":investigation_id}).scalar_one() is None; assert conn.execute(text("SELECT execution_attempt_id FROM findings WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one() is None; assert conn.execute(text("SELECT execution_attempt_id FROM module_runs WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one() is None; assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0007"
-    command.downgrade(cfg,"0002"); inspector=inspect(engine); assert "execution_id" not in {c["name"] for c in inspector.get_columns("investigations")}; assert "execution_attempt_id" not in {c["name"] for c in inspector.get_columns("investigations")}; assert "execution_id" not in {c["name"] for c in inspector.get_columns("module_runs")}; assert "execution_attempt_id" not in {c["name"] for c in inspector.get_columns("module_runs")}; assert "persistence_key" not in {c["name"] for c in inspector.get_columns("findings")}; assert "evidence_state" not in {c["name"] for c in inspector.get_columns("findings")]; assert "execution_attempts" not in inspect(engine).get_table_names()
+        execution_id=conn.execute(text("SELECT execution_id FROM investigations WHERE id=:id"),{"id":investigation_id}).scalar_one()
+        assert execution_id
+        assert conn.execute(text("SELECT execution_id FROM findings WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one()==execution_id
+        assert conn.execute(text("SELECT execution_id FROM module_runs WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one()==execution_id
+        assert conn.execute(text("SELECT execution_attempt_id FROM investigations WHERE id=:id"),{"id":investigation_id}).scalar_one() is None
+        assert conn.execute(text("SELECT execution_attempt_id FROM findings WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one() is None
+        assert conn.execute(text("SELECT execution_attempt_id FROM module_runs WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one() is None
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0007"
+    command.downgrade(cfg,"0002")
+    inspector=inspect(engine)
+    assert "execution_id" not in {c["name"] for c in inspector.get_columns("investigations")}
+    assert "execution_attempt_id" not in {c["name"] for c in inspector.get_columns("investigations")}
+    assert "execution_id" not in {c["name"] for c in inspector.get_columns("module_runs")}
+    assert "execution_attempt_id" not in {c["name"] for c in inspector.get_columns("module_runs")}
+    assert "persistence_key" not in {c["name"] for c in inspector.get_columns("findings")}
+    assert "evidence_state" not in {c["name"] for c in inspector.get_columns("findings")}
+    assert "execution_attempts" not in inspect(engine).get_table_names()
