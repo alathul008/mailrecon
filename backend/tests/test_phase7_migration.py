@@ -4,8 +4,7 @@ from alembic.config import Config
 
 
 def migration_config(db_path):
-    cfg = Config("alembic.ini")
-    cfg.config_file_name = None
+    cfg = Config()
     cfg.set_main_option("script_location", "backend/alembic")
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     return cfg
