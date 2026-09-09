@@ -49,13 +49,21 @@ def set_module(db,inv_id,name,status,message=None,token=None):
         _require_ownership(db,inv_id,token)
     inv=db.get(Investigation,inv_id)
     if not inv: return
-    m=db.scalar(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.execution_id==inv.execution_id,ModuleRun.module==name))
+    if not inv.execution_id or not inv.execution_attempt_id:
+        raise RuntimeError("Investigation has no durable execution provenance")
+    m=db.scalar(select(ModuleRun).where(
+        ModuleRun.investigation_id==inv_id,
+        ModuleRun.execution_attempt_id==inv.execution_attempt_id,
+        ModuleRun.module==name,
+    ))
     if not m:
-        m=db.scalar(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.module==name))
-    if not m:
-        m=ModuleRun(investigation_id=inv_id,execution_id=inv.execution_id,module=name); db.add(m)
-    else:
-        m.execution_id=inv.execution_id
+        m=ModuleRun(
+            investigation_id=inv_id,
+            execution_id=inv.execution_id,
+            execution_attempt_id=inv.execution_attempt_id,
+            module=name,
+        )
+        db.add(m)
     m.status=status; m.message=message
     if status=="running": m.started_at=utcnow()
     if status in {"completed","failed","skipped"}: m.finished_at=utcnow()
@@ -68,8 +76,8 @@ def add_findings(db,inv_id,fs,token=None):
         _require_ownership(db,inv_id,token)
     inv=db.get(Investigation,inv_id)
     if not inv: return
-    if not inv.execution_id:
-        raise RuntimeError("Investigation has no durable execution identity")
+    if not inv.execution_id or not inv.execution_attempt_id:
+        raise RuntimeError("Investigation has no durable execution provenance")
     inserted=set()
     for f in fs:
         f=dict(f)
@@ -97,7 +105,13 @@ def add_findings(db,inv_id,fs,token=None):
         if legacy:
             inserted.add(key)
             continue
-        db.add(Finding(investigation_id=inv_id,execution_id=inv.execution_id,persistence_key=key,**f))
+        db.add(Finding(
+            investigation_id=inv_id,
+            execution_id=inv.execution_id,
+            execution_attempt_id=inv.execution_attempt_id,
+            persistence_key=key,
+            **f,
+        ))
         inserted.add(key)
     db.commit()
 
@@ -157,9 +171,10 @@ def mark_investigation_failed(db, inv_id, token, exc):
         return False
     inv.status="failed"; inv.completed_at=None; inv.execution_token=None; inv.execution_heartbeat_at=None
     db.commit()
-    for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)).all():
-        if m.execution_id is None:
-            m.execution_id=inv.execution_id
+    for m in db.scalars(select(ModuleRun).where(
+        ModuleRun.investigation_id==inv_id,
+        ModuleRun.execution_attempt_id==inv.execution_attempt_id,
+    )).all():
         if m.status == "running":
             m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
         elif m.status == "queued":
