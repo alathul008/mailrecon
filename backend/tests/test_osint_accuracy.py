@@ -7,8 +7,10 @@ from app.models import Finding, Investigation
 from app.osint.email import (
     EVIDENCE_CORROBORATED,
     EVIDENCE_DERIVED,
+    EVIDENCE_OBSERVED,
     EVIDENCE_POSSIBLE,
     EVIDENCE_SOURCE_ASSOCIATED,
+    EVIDENCE_STATES,
     username_candidates,
 )
 from app.providers.github import GitHubProvider
@@ -16,7 +18,7 @@ from app.providers.gravatar import GravatarProvider
 from app.providers import github as github_module
 from app.providers import gravatar as gravatar_module
 from app.risk.engine import calculate
-from app.services.orchestrator import add_findings, _finding_evidence_state, _rdap_domain_consistency, _graph_relation
+from app.services.orchestrator import add_findings, _finding_evidence_state, _rdap_domain_consistency, _graph_relation, DERIVED_USERNAME_RELATION
 from app.providers.base import ProviderResult
 import httpx
 
@@ -51,6 +53,25 @@ def test_username_normalization_is_deterministic_and_collision_prone_but_derived
     assert set(username_candidates("John.Doe+tag")) == {"john-doe", "john.doe", "john_doe", "johndoe"}
     assert set(username_candidates("john-doe")) == {"john-doe", "john_doe", "johndoe"}
     assert set(username_candidates("john.doe")) == {"john-doe", "john.doe", "john_doe", "johndoe"}
+
+
+def test_evidence_taxonomy_is_explicit_and_consistent():
+    assert EVIDENCE_STATES == {
+        EVIDENCE_DERIVED,
+        EVIDENCE_POSSIBLE,
+        EVIDENCE_CORROBORATED,
+        EVIDENCE_SOURCE_ASSOCIATED,
+        EVIDENCE_OBSERVED,
+        "confirmed",
+    }
+    rows = [
+        {"notes": f"Evidence state: {EVIDENCE_DERIVED}. hypothesis only", "confidence": 0.0},
+        {"notes": f"Evidence state: {EVIDENCE_POSSIBLE}. weak correlation", "confidence": 0.95},
+        {"notes": f"Evidence state: {EVIDENCE_CORROBORATED}. exact public email", "confidence": 0.95},
+        {"notes": f"Evidence state: {EVIDENCE_SOURCE_ASSOCIATED}. source association", "confidence": 0.99},
+        {"notes": f"Evidence state: {EVIDENCE_OBSERVED}. factual observation", "confidence": 1.0},
+    ]
+    assert [_finding_evidence_state(type("Row", (), row)()) for row in rows] == [EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED]
 
 
 def test_evidence_states_are_not_numeric_confidence():
@@ -103,6 +124,14 @@ def test_graph_relations_preserve_evidence_state():
     assert _graph_relation("public_identity", EVIDENCE_SOURCE_ASSOCIATED) == "source_associated_identity"
     assert _graph_relation("breach", None) == "historical_breach_exposure"
     assert _graph_relation("profile_candidate", EVIDENCE_CORROBORATED) != "associated_identity"
+
+
+def test_username_graph_relation_is_explicitly_derived_and_not_registered():
+    assert DERIVED_USERNAME_RELATION == "derived_username"
+    assert DERIVED_USERNAME_RELATION != "registered_as"
+    analysis = {"disposable": False, "suspicious_chars": False, "idn": False, "has_dmarc": True, "has_spf": True, "dnssec": None}
+    derived = [{"finding_type": "username_candidate", "value": "johnsmith", "confidence": 1.0, "notes": f"Evidence state: {EVIDENCE_DERIVED}. Generated from email local-part; hypothesis only."}]
+    assert calculate(analysis, derived).dimensions["identity_exposure"] == 0
 
 
 @pytest.mark.asyncio
