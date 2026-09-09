@@ -91,5 +91,5 @@ class GraphEdge(Base):
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(String(300))
     target: Mapped[str] = mapped_column(String(300))
-    relation: Mapped[str] = mapped_column(String(300))
+    relation: Mapped[str] = mapped_column(String(80))
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
