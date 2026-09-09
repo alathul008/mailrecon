@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
@@ -43,6 +45,12 @@ class RDAPProvider:
                     event_date = event.get("eventDate")
                     if not isinstance(event_date, str):
                         continue
+                    first_seen = None
+                    try:
+                        parsed_event_date = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
+                        first_seen = parsed_event_date if parsed_event_date.tzinfo else parsed_event_date.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        pass
                     findings.append(
                         finding(
                             self.name,
@@ -52,6 +60,7 @@ class RDAPProvider:
                             "info",
                             url,
                             raw_reference=event,
+                            first_seen=first_seen,
                         )
                     )
             return ProviderResult(self.name, "ok", findings=findings, message="Public RDAP metadata collected")

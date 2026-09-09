@@ -59,3 +59,15 @@ def test_provider_states_are_explicit():
             assert all(x['status'] for x in data)
     finally:
         settings.api_key=original
+
+
+def test_timeline_requires_bearer_authentication():
+    settings=get_settings()
+    original=settings.api_key
+    settings.api_key='test-secret-key'
+    try:
+        with TestClient(app) as c:
+            assert c.get('/api/investigations/1/timeline').status_code == 401
+            assert c.get('/api/investigations/1/timeline', headers={'Authorization':'Bearer wrong-key'}).status_code == 401
+    finally:
+        settings.api_key=original

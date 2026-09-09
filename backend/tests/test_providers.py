@@ -60,6 +60,8 @@ async def test_rdap_success_and_event_parsing(monkeypatch):
     result = await RDAPProvider().run("example.com")
     assert result.status == "ok"
     assert {f["finding_type"] for f in result.findings} == {"domain", "domain_event"}
+    domain_event = next(f for f in result.findings if f["finding_type"] == "domain_event")
+    assert domain_event["first_seen"].isoformat() == "2025-01-02T00:00:00+00:00"
 
 
 @pytest.mark.asyncio

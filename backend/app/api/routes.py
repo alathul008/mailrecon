@@ -12,6 +12,7 @@ from app.core.auth import require_api_key
 
 router=APIRouter(prefix="/api")
 
+TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach"}
 
 def evidence_state(f):
     notes=f.notes or ""
@@ -21,6 +22,10 @@ def evidence_state(f):
     if isinstance(f.raw_reference,dict) and isinstance(f.raw_reference.get("evidence_state"),str):
         return f.raw_reference["evidence_state"]
     return None
+
+def timeline_timestamp(f):
+    """Use earliest known observation time; fall back to collection time when absent."""
+    return f.first_seen or f.collected_at
 
 @router.get("/health")
 def health(): return {"status":"ok","service":"MailRecon"}
@@ -67,7 +72,7 @@ def list_investigations(db: Session=Depends(get_db)):
 def load(inv_id,db):
     q=db.execute(select(Investigation).where(Investigation.id==inv_id)); inv=q.scalar_one_or_none()
     if not inv: raise HTTPException(404,"Investigation not found")
-    fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id).order_by(Finding.collected_at.desc())); findings=fq.scalars().all()
+    fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id).order_by(Finding.collected_at.desc(),Finding.id.desc())); findings=fq.scalars().all()
     mq=db.execute(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)); mods=mq.scalars().all(); return inv,findings,mods
 
 @router.get("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
@@ -98,14 +103,27 @@ def risk(inv_id:int,db:Session=Depends(get_db)):
 
 @router.get("/investigations/{inv_id}/timeline", dependencies=[Depends(require_api_key)])
 def timeline(inv_id:int,db:Session=Depends(get_db)):
-    _,fs,mods=load(inv_id,db)
+    """Project approved evidence-bearing findings into a deterministic forensic timeline.
+
+    timestamp is first_seen when available, otherwise collected_at. collected_at
+    remains separate so collection time is never presented as fact occurrence time.
+    Only explicitly classified evidence types are projected; processing and
+    assessment findings remain available through their existing endpoints.
+    """
+    _,fs,_=load(inv_id,db)
     events=[]
+    seen=set()
     for f in fs:
-        events.append({"timestamp":f.collected_at,"kind":"finding","label":f.finding_type,"source":f.source,"value":f.value,"severity":f.severity,"confidence":f.confidence,"evidence_state":evidence_state(f)})
-    for m in mods:
-        if m.started_at: events.append({"timestamp":m.started_at,"kind":"module","label":m.module,"source":"MailRecon","value":m.status,"severity":"info","confidence":1.0})
-        if m.finished_at: events.append({"timestamp":m.finished_at,"kind":"module_complete","label":m.module,"source":"MailRecon","value":m.status,"severity":"info","confidence":1.0})
-    events.sort(key=lambda x:x["timestamp"],reverse=True)
+        if f.finding_type not in TIMELINE_FINDING_TYPES:
+            continue
+        state=evidence_state(f)
+        timestamp=timeline_timestamp(f)
+        key=(f.source,f.finding_type,f.value,state,timestamp,f.collected_at)
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append({"id":f.id,"timestamp":timestamp,"last_seen":f.last_seen,"collected_at":f.collected_at,"kind":"finding","label":f.finding_type,"source":f.source,"value":f.value,"severity":f.severity,"confidence":f.confidence,"evidence_state":state})
+    events.sort(key=lambda x:(x["timestamp"],x["id"]),reverse=True)
     return events[:500]
 
 @router.get("/investigations/{inv_id}/graph", dependencies=[Depends(require_api_key)])
