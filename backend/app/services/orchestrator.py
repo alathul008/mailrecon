@@ -161,9 +161,10 @@ async def run_providers(email: str, domain: str, candidates: list[str]):
 
 
 def _finding_evidence_state(row):
-    if row.evidence_state:
-        return row.evidence_state
-    notes=row.notes or ""
+    state=getattr(row,"evidence_state",None)
+    if state:
+        return state
+    notes=getattr(row,"notes",None) or ""
     marker="Evidence state: "
     if marker in notes:
         return notes.split(marker,1)[1].split(".",1)[0].strip()
