@@ -11,7 +11,16 @@ EVIDENCE_DERIVED = "derived"
 EVIDENCE_POSSIBLE = "possible_match"
 EVIDENCE_CORROBORATED = "corroborated_match"
 EVIDENCE_SOURCE_ASSOCIATED = "source_associated"
+EVIDENCE_OBSERVED = "observed"
 EVIDENCE_CONFIRMED = "confirmed"
+EVIDENCE_STATES = frozenset({
+    EVIDENCE_DERIVED,
+    EVIDENCE_POSSIBLE,
+    EVIDENCE_CORROBORATED,
+    EVIDENCE_SOURCE_ASSOCIATED,
+    EVIDENCE_OBSERVED,
+    EVIDENCE_CONFIRMED,
+})
 
 
 def analyze_email(raw: str) -> dict:
