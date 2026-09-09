@@ -20,6 +20,7 @@ jobs:
           git show d30976868738109b38303a33f327d6ea9e53e106:backend/requirements.lock > backend/requirements.lock
           python -m pip install --disable-pip-version-check pip-tools==7.6.1
           pip-compile --generate-hashes --no-upgrade --reuse-hashes --output-file backend/requirements.lock backend/requirements.txt
+          sed -i 's/pip-compile --generate-hashes --no-index --output-file=backend\/requirements.lock backend\/requirements.txt/pip-compile --generate-hashes --no-upgrade --reuse-hashes --output-file=backend\/requirements.lock backend\/requirements.txt/' backend/requirements.lock
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add backend/requirements.lock
