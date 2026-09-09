@@ -10,7 +10,7 @@ Finding persistence uses a deterministic semantic key scoped to `(investigation_
 
 This is scoped replay protection, not global finding deduplication. Different investigations have different logical execution identities and remain separate acquisitions even when their target and evidence are identical.
 
-Existing Phase 6/early Phase 7 rows are adopted lazily when an investigation is first claimed: child records without an execution identity receive both the logical identity and the first actual attempt identity. Recovery does not rewrite prior attempt provenance.
+Legacy child records are not reassigned during a new claim. Phase 7 migrations backfill the stable logical `execution_id` where needed but deliberately leave `execution_attempt_id` null until an actual worker claim. New ModuleRun rows are attempt-scoped, so a recovery attempt cannot overwrite or mutate the prior attempt's ModuleRun provenance.
 
 ## Stale-worker fencing
 
