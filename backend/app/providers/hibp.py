@@ -1,28 +1,71 @@
-import httpx
+from datetime import datetime, timezone
 from urllib.parse import quote
+
+import httpx
+
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
-from datetime import datetime, timezone
+from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+
 
 class HIBPProvider:
     name = "Have I Been Pwned"
+
     async def run(self, email: str) -> ProviderResult:
-        s = get_settings()
-        if not s.hibp_api_key:
+        settings = get_settings()
+        if not settings.hibp_api_key:
             return ProviderResult(self.name, "unconfigured", message="Provider unavailable — configure HIBP_API_KEY")
-        headers = {"hibp-api-key": s.hibp_api_key, "user-agent": s.hibp_user_agent}
+
+        headers = {"hibp-api-key": settings.hibp_api_key, "user-agent": settings.hibp_user_agent}
         url = "https://haveibeenpwned.com/api/v3/breachedaccount/" + quote(email, safe="")
         try:
-            async with httpx.AsyncClient(timeout=s.request_timeout_seconds, headers=headers) as client:
-                r = await client.get(url, params={"truncateResponse": "false"})
-                if r.status_code == 404:
-                    return ProviderResult(self.name, "ok", message="No known breaches returned by HIBP")
-                if r.status_code in (401,403): return ProviderResult(self.name, "error", message="HIBP API key rejected")
-                r.raise_for_status()
-                data = r.json()
-            findings=[]
+            validate_provider_url(url)
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, headers=headers, follow_redirects=False) as client:
+                response = await client.get(url, params={"truncateResponse": "false"})
+            if response.status_code == 404:
+                return ProviderResult(self.name, "ok", message="No known breaches returned by HIBP")
+            failure = classify_response(self.name, response)
+            if failure:
+                return failure
+            data, parse_failure = parse_json(response, self.name)
+            if parse_failure:
+                return parse_failure
+            if not isinstance(data, list):
+                return ProviderResult(self.name, "error", message="HIBP response was not a breach list")
+
+            findings = []
             for breach in data:
-                findings.append(finding(self.name, "breach", breach.get("Name", "Unknown"), 0.99, "high", "https://haveibeenpwned.com/", notes="Breach metadata only; no passwords are displayed.", raw_reference={"domain": breach.get("Domain"), "date": breach.get("BreachDate"), "data_classes": breach.get("DataClasses", [])}, first_seen=datetime.fromisoformat(breach["BreachDate"]).replace(tzinfo=timezone.utc) if breach.get("BreachDate") else None))
+                if not isinstance(breach, dict):
+                    continue
+                name = breach.get("Name")
+                if not isinstance(name, str) or not name:
+                    continue
+                breach_date = breach.get("BreachDate")
+                first_seen = None
+                if isinstance(breach_date, str) and breach_date:
+                    try:
+                        parsed = datetime.fromisoformat(breach_date)
+                        first_seen = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
+                    except ValueError:
+                        breach_date = None
+                raw_reference = {
+                    "domain": breach.get("Domain"),
+                    "date": breach_date,
+                    "data_classes": breach.get("DataClasses", []),
+                }
+                findings.append(
+                    finding(
+                        self.name,
+                        "breach",
+                        name,
+                        0.99,
+                        "high",
+                        "https://haveibeenpwned.com/",
+                        notes="Breach metadata only; no passwords are displayed.",
+                        raw_reference=raw_reference,
+                        first_seen=first_seen,
+                    )
+                )
             return ProviderResult(self.name, "ok", findings=findings, message=f"{len(findings)} breach records returned")
         except Exception as exc:
-            return ProviderResult(self.name, "error", message=f"HIBP request failed: {type(exc).__name__}")
+            return classify_exception(self.name, exc)

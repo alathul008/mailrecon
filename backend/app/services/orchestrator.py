@@ -41,6 +41,10 @@ def provider_finding(result):
         raw_reference={"status": result.status},
     )
 
+async def run_providers(email: str, domain: str, candidates: list[str]):
+    providers=[GravatarProvider().run(email), RDAPProvider().run(domain), GitHubProvider().run(candidates,email), HIBPProvider().run(email)]
+    return await asyncio.gather(*providers,return_exceptions=True)
+
 async def run_investigation(inv_id:int):
     with SessionLocal() as db:
         inv=db.get(Investigation,inv_id)
@@ -72,8 +76,7 @@ async def run_investigation(inv_id:int):
             set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP")
 
             for n in ["gravatar","rdap","public_profile_discovery","breach_sources"]: set_module(db,inv_id,n,"running")
-            providers=[GravatarProvider().run(analysis["email"]), RDAPProvider().run(analysis["domain"]), GitHubProvider().run(candidates,analysis["email"]), HIBPProvider().run(analysis["email"])]
-            results=await asyncio.gather(*providers,return_exceptions=True)
+            results=await run_providers(analysis["email"],analysis["domain"],candidates)
             mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("breach_sources",results[3])]
             for name,res in mapping:
                 if isinstance(res,Exception):
