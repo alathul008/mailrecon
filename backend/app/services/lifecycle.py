@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Investigation, Finding, ModuleRun
+from app.models import Investigation
 
 
 def utcnow():
@@ -87,31 +87,10 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     # Bulk UPDATEs intentionally avoid ORM synchronization; refresh the row so
     # sessions configured with expire_on_commit=False still observe the claim.
     db.refresh(inv)
-    # ORM-created legacy rows normally already have execution_id. This fallback
-    # also makes claims safe for Phase 6 databases where it was not persisted.
     if not inv.execution_id:
-        inv.execution_id = generated_execution_id
-        db.commit()
-        db.refresh(inv)
+        raise RuntimeError("Investigation claim has no durable logical execution identity")
     if not inv.execution_attempt_id:
         raise RuntimeError("Investigation claim has incomplete execution-attempt provenance")
-
-    # Legacy Phase 6/early Phase 7 rows did not carry execution provenance.
-    # Attach them to the first actual worker attempt; later recovery attempts
-    # receive a new attempt identity and leave prior provenance untouched.
-    db.execute(
-        update(Finding)
-        .where(Finding.investigation_id == inv_id, Finding.execution_id.is_(None))
-        .values(execution_id=inv.execution_id, execution_attempt_id=inv.execution_attempt_id)
-        .execution_options(synchronize_session=False)
-    )
-    db.execute(
-        update(ModuleRun)
-        .where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_id.is_(None))
-        .values(execution_id=inv.execution_id, execution_attempt_id=inv.execution_attempt_id)
-        .execution_options(synchronize_session=False)
-    )
-    db.commit()
     return token
 
 
