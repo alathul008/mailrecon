@@ -23,11 +23,14 @@ def pdf_report(inv, findings, factors, provenance=None):
     story.append(Paragraph("Findings",styles["Heading2"])); rows=[["Source","Type","Value","Confidence","Severity","Evidence","Attempt"]]
     current_attempt=provenance.get("execution_attempt_id")
     for f in findings:
-        attempt_label="current" if f.execution_attempt_id == current_attempt else "historical"
+        attempt_id=getattr(f,"execution_attempt_id",None)
+        if current_attempt and attempt_id == current_attempt: attempt_label="current"
+        elif current_attempt and attempt_id: attempt_label="historical"
+        else: attempt_label="unspecified"
         evidence=getattr(f,"evidence_state",None)
         if not evidence:
-            notes=f.notes or ""; marker="Evidence state: "
+            notes=getattr(f,"notes",None) or ""; marker="Evidence state: "
             evidence=notes.split(marker,1)[1].split(".",1)[0].strip() if marker in notes else None
-        rows.append([_pdf_text(f.source),_pdf_text(f.finding_type),_pdf_text(f.value)[:70],_pdf_text(f"{f.confidence:.0%}"),_pdf_text(f.severity),_pdf_text(evidence),_pdf_text(attempt_label)])
+        rows.append([_pdf_text(getattr(f,"source",None)),_pdf_text(getattr(f,"finding_type",None)),_pdf_text(getattr(f,"value",None))[:70],_pdf_text(f"{getattr(f,'confidence',0):.0%}"),_pdf_text(getattr(f,"severity",None)),_pdf_text(evidence),_pdf_text(attempt_label)])
     t=Table(rows,colWidths=[70,65,130,55,55,65,60],repeatRows=1); t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.25,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"TOP")])); story.append(t)
     doc.build(story); buf.seek(0); return buf
