@@ -1,6 +1,10 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.main import app
+from app.api.routes import module_projection
+from app.models import ModuleRun
 
 
 def test_health_and_security_headers():
@@ -71,3 +75,33 @@ def test_timeline_requires_bearer_authentication():
             assert c.get('/api/investigations/1/timeline', headers={'Authorization':'Bearer wrong-key'}).status_code == 401
     finally:
         settings.api_key=original
+
+
+def test_module_projection_marks_only_authoritative_attempt_current():
+    started = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
+    abandoned = ModuleRun(
+        module="rdap",
+        status="abandoned",
+        execution_id="execution-1",
+        execution_attempt_id="attempt-a",
+        started_at=started,
+        finished_at=None,
+        message="historical attempt",
+    )
+    current = ModuleRun(
+        module="rdap",
+        status="running",
+        execution_id="execution-1",
+        execution_attempt_id="attempt-b",
+        started_at=started,
+        finished_at=None,
+        message="current attempt",
+    )
+    old_view = module_projection(abandoned, "attempt-b")
+    current_view = module_projection(current, "attempt-b")
+    assert old_view["status"] == "abandoned"
+    assert old_view["execution_attempt_id"] == "attempt-a"
+    assert old_view["current"] is False
+    assert old_view["started_at"] == started
+    assert current_view["execution_attempt_id"] == "attempt-b"
+    assert current_view["current"] is True
