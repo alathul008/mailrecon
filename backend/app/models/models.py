@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from sqlalchemy import DateTime, Float, Integer, String, Text, ForeignKey, JSON, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.session import Base
@@ -21,7 +22,7 @@ class Investigation(Base):
     execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     execution_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True)
+    execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True, index=True, default=lambda: str(uuid.uuid4()))
 
 class Finding(Base):
     __tablename__ = "findings"
