@@ -240,3 +240,100 @@ def test_completed_modules_remain_completed_after_later_failure(tmp_path):
         assert db.get(ModuleRun, running.id).status == "failed"
         assert db.get(ModuleRun, queued.id).status == "skipped"
         assert db.get(Investigation, inv.id).status == "failed"
+
+
+def test_stale_attempt_modules_are_abandoned_without_losing_provenance(tmp_path):
+    db_engine = make_engine(tmp_path)
+    now = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
+    old = now - timedelta(seconds=get_settings().execution_lease_seconds + 1)
+    with Session(db_engine) as db:
+        inv = add_investigation(db, status="queued")
+        first_token = lifecycle.claim_investigation(db, inv.id, now=old)
+        current = db.get(Investigation, inv.id)
+        first_execution_id = current.execution_id
+        first_attempt_id = current.execution_attempt_id
+        running = ModuleRun(
+            investigation_id=inv.id,
+            execution_id=first_execution_id,
+            execution_attempt_id=first_attempt_id,
+            module="rdap",
+            status="running",
+            message="started",
+            started_at=old,
+        )
+        queued = ModuleRun(
+            investigation_id=inv.id,
+            execution_id=first_execution_id,
+            execution_attempt_id=first_attempt_id,
+            module="graph_build",
+            status="queued",
+        )
+        completed = ModuleRun(
+            investigation_id=inv.id,
+            execution_id=first_execution_id,
+            execution_attempt_id=first_attempt_id,
+            module="email_validation",
+            status="completed",
+            message="done",
+            started_at=old,
+            finished_at=old + timedelta(seconds=1),
+        )
+        other_attempt = ModuleRun(
+            investigation_id=inv.id,
+            execution_id=first_execution_id,
+            execution_attempt_id="other-attempt",
+            module="dns_analysis",
+            status="running",
+        )
+        db.add_all([running, queued, completed, other_attempt])
+        db.commit()
+
+        assert first_token
+        assert lifecycle.recover_stale_investigations(db, now=now) == 1
+        recovered = db.get(Investigation, inv.id)
+        assert recovered.status == "queued"
+        assert recovered.execution_token is None
+        assert recovered.execution_attempt_id == first_attempt_id
+        assert db.get(ModuleRun, running.id).status == "abandoned"
+        assert db.get(ModuleRun, queued.id).status == "abandoned"
+        assert db.get(ModuleRun, completed.id).status == "completed"
+        assert db.get(ModuleRun, running.id).execution_id == first_execution_id
+        assert db.get(ModuleRun, running.id).execution_attempt_id == first_attempt_id
+        assert db.get(ModuleRun, running.id).started_at == old
+        assert db.get(ModuleRun, other_attempt.id).status == "running"
+
+        second_token = lifecycle.claim_investigation(db, inv.id, now=now + timedelta(seconds=1))
+        second = db.get(Investigation, inv.id)
+        assert second_token
+        assert second.execution_id == first_execution_id
+        assert second.execution_attempt_id
+        assert second.execution_attempt_id != first_attempt_id
+
+
+def test_repeated_stale_recovery_abandons_only_current_attempt(tmp_path):
+    db_engine = make_engine(tmp_path)
+    lease = get_settings().execution_lease_seconds
+    with Session(db_engine) as db:
+        t0 = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
+        inv = add_investigation(db)
+        token_a = lifecycle.claim_investigation(db, inv.id, now=t0)
+        attempt_a = db.get(Investigation, inv.id).execution_attempt_id
+        run_a = ModuleRun(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id=attempt_a, module="rdap", status="running", started_at=t0)
+        db.add(run_a)
+        db.commit()
+        assert token_a
+
+        assert lifecycle.recover_stale_investigations(db, now=t0 + timedelta(seconds=lease + 1)) == 1
+        assert db.get(ModuleRun, run_a.id).status == "abandoned"
+
+        token_b = lifecycle.claim_investigation(db, inv.id, now=t0 + timedelta(seconds=lease + 2))
+        attempt_b = db.get(Investigation, inv.id).execution_attempt_id
+        run_b = ModuleRun(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id=attempt_b, module="rdap", status="running")
+        db.add(run_b)
+        db.commit()
+        assert token_b
+        assert attempt_b != attempt_a
+
+        assert lifecycle.recover_stale_investigations(db, now=t0 + timedelta(seconds=2 * lease + 3)) == 1
+        assert db.get(ModuleRun, run_a.id).status == "abandoned"
+        assert db.get(ModuleRun, run_b.id).status == "abandoned"
