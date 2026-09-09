@@ -28,7 +28,7 @@ def test_phase7_migration_upgrades_legacy_schema_and_downgrades_cleanly(tmp_path
     finding_columns = {c["name"] for c in inspector.get_columns("findings")}
     module_columns = {c["name"] for c in inspector.get_columns("module_runs")}
     assert {"execution_id", "execution_attempt_id"} <= investigation_columns
-    assert {"execution_id", "execution_attempt_id", "persistence_key"} <= finding_columns
+    assert {"execution_id", "execution_attempt_id", "persistence_key", "evidence_state"} <= finding_columns
     assert {"execution_id", "execution_attempt_id"} <= module_columns
     with engine.connect() as conn:
         execution_id = conn.execute(text("SELECT execution_id FROM investigations WHERE id=:id"), {"id": investigation_id}).scalar_one()
@@ -39,7 +39,7 @@ def test_phase7_migration_upgrades_legacy_schema_and_downgrades_cleanly(tmp_path
         assert conn.execute(text("SELECT execution_attempt_id FROM findings WHERE investigation_id=:id"), {"id": investigation_id}).scalar_one() is None
         assert conn.execute(text("SELECT execution_attempt_id FROM module_runs WHERE investigation_id=:id"), {"id": investigation_id}).scalar_one() is None
         version = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert version == "0003"
+        assert version == "0004"
 
     command.downgrade(cfg, "0002")
     inspector = inspect(engine)
@@ -48,3 +48,4 @@ def test_phase7_migration_upgrades_legacy_schema_and_downgrades_cleanly(tmp_path
     assert "execution_id" not in {c["name"] for c in inspector.get_columns("module_runs")}
     assert "execution_attempt_id" not in {c["name"] for c in inspector.get_columns("module_runs")}
     assert "persistence_key" not in {c["name"] for c in inspector.get_columns("findings")}
+    assert "evidence_state" not in {c["name"] for c in inspector.get_columns("findings")}
