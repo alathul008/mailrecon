@@ -31,7 +31,7 @@ def test_runtime_schema_bootstrap_reaches_head_and_detects_physical_drift(tmp_pa
     engine=create_engine(f"sqlite:///{tmp_path/'schema.db'}"); monkeypatch.setattr(schema,"engine",engine); settings=get_settings(); old_url=settings.database_url; settings.database_url=f"sqlite:///{tmp_path/'schema.db'}"
     try:
         schema.ensure_schema()
-        with engine.connect() as conn: assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0005"
+        with engine.connect() as conn: assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0006"
         with engine.begin() as conn: conn.execute(text("DROP INDEX ix_investigations_execution_attempt_id")); conn.execute(text("ALTER TABLE investigations DROP COLUMN execution_attempt_id"))
         with pytest.raises(RuntimeError,match="columns diverge"): schema.ensure_schema()
     finally: settings.database_url=old_url
@@ -51,5 +51,5 @@ def test_runtime_schema_bootstraps_unversioned_phase6_database(tmp_path,monkeypa
     monkeypatch.setattr(schema,"engine",engine); settings=get_settings(); old_url=settings.database_url; settings.database_url=f"sqlite:///{db_path}"
     try:
         schema.ensure_schema()
-        with engine.connect() as conn: assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0005"
+        with engine.connect() as conn: assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0006"
     finally: settings.database_url=old_url
