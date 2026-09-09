@@ -1,5 +1,3 @@
-import asyncio
-
 import httpx
 import pytest
 from sqlalchemy import create_engine
@@ -278,16 +276,16 @@ async def test_provider_timeout_uses_configured_value(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_provider_execution_isolated_when_one_raises(monkeypatch):
-    async def ok_gravatar(email):
+    async def ok_gravatar(self, email):
         return ProviderResult("Gravatar", "ok", message="done")
 
-    async def broken_rdap(domain):
+    async def broken_rdap(self, domain):
         raise RuntimeError("boom")
 
-    async def ok_github(candidates, email):
+    async def ok_github(self, candidates, email):
         return ProviderResult("GitHub", "ok", message="done")
 
-    async def unconfigured_hibp(email):
+    async def unconfigured_hibp(self, email):
         return ProviderResult("Have I Been Pwned", "unconfigured")
 
     monkeypatch.setattr(orchestrator.GravatarProvider, "run", ok_gravatar)
