@@ -35,6 +35,9 @@ def claim_investigation(db,inv_id,*,now=None):
     refreshed=db.execute(select(Investigation.execution_id,Investigation.execution_attempt_id).where(Investigation.id==inv_id)).one_or_none()
     if not refreshed or not refreshed[0] or not refreshed[1]:db.rollback();raise RuntimeError("Investigation claim has incomplete execution provenance")
     execution_id,execution_attempt_id=refreshed
+    inv=db.get(Investigation,inv_id)
+    if inv is not None:
+        inv.execution_id=execution_id;inv.execution_attempt_id=execution_attempt_id;inv.execution_token=token;inv.status="running";inv.execution_started_at=now;inv.execution_heartbeat_at=now;inv.completed_at=None
     if stale_claim and old_attempt_id:_mark_attempt_abandoned(db,inv_id,old_attempt_id,now=now,reason="Superseded by a new worker claim")
     _create_attempt(db,inv_id,execution_id,execution_attempt_id,now=now);db.execute(update(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.execution_attempt_id.is_(None)).values(execution_id=execution_id,execution_attempt_id=execution_attempt_id));db.commit();return token
 def fence_execution(db,inv_id,token):
