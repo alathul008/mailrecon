@@ -138,6 +138,16 @@ def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
 
 @router.delete("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
 def delete_inv(inv_id:int,db:Session=Depends(get_db)):
-    result=db.execute(delete(Investigation).where(Investigation.id==inv_id)); db.commit()
-    if result.rowcount != 1: raise HTTPException(404,"Investigation not found")
-    return {"deleted":True}
+    try:
+        result=db.execute(delete(Investigation).where(Investigation.id==inv_id))
+        if result.rowcount != 1:
+            db.rollback()
+            raise HTTPException(404,"Investigation not found")
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    return {"id":inv_id,"status":"deleted"}
