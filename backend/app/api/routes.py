@@ -1,4 +1,4 @@
-import asyncio, csv, io, json, html
+import csv, io, json, html
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse, HTMLResponse
 from sqlalchemy import select, func, delete
@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.schemas.schemas import InvestigationCreate
-from app.services.orchestrator import run_investigation, MODULES
+from app.services.orchestrator import MODULES
 from app.reports.render import pdf_report
 from app.core.auth import require_api_key
 
@@ -48,10 +48,10 @@ async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
     inv=Investigation(target=str(payload.email),normalized_email=str(payload.email),username=str(payload.email).split("@",1)[0],domain=str(payload.email).split("@",1)[1].lower(),privacy_mode=payload.privacy_mode,status="queued")
     db.add(inv); db.commit(); db.refresh(inv)
     for m in MODULES: db.add(ModuleRun(investigation_id=inv.id,module=m,status="queued"))
-    db.commit(); asyncio.create_task(run_investigation(inv.id)); return {"id":inv.id,"status":"queued"}
+    db.commit(); return {"id":inv.id,"status":"queued"}
 
 @router.post("/demo", dependencies=[Depends(require_api_key)])
-def demo(db: Session=Depends(get_db)):
+def demo(db:Session=Depends(get_db)):
     inv=Investigation(target="alex.morgan@fictional.test",normalized_email="alex.morgan@fictional.test",username="alex.morgan",domain="fictional.test",status="completed",risk_score=42,risk_level="MEDIUM",privacy_mode=False)
     db.add(inv); db.commit(); db.refresh(inv)
     demo_findings=[
@@ -66,7 +66,7 @@ def demo(db: Session=Depends(get_db)):
     e=GraphNode(investigation_id=inv.id,node_key="email:alex.morgan@fictional.test",node_type="EMAIL",label="alex.morgan@fictional.test"); d=GraphNode(investigation_id=inv.id,node_key="domain:fictional.test",node_type="DOMAIN",label="fictional.test"); p=GraphNode(investigation_id=inv.id,node_key="profile:https://github.com/alex-morgan-demo",node_type="PROFILE",label="github.com/alex-morgan-demo",node_metadata={"evidence_state":"possible_match","confidence":0.72}); db.add_all([e,d,p]); db.flush(); db.add_all([GraphEdge(investigation_id=inv.id,source=e.node_key,target=d.node_key,relation="uses",confidence=1),GraphEdge(investigation_id=inv.id,source=e.node_key,target=p.node_key,relation="possible_profile",confidence=.72)]); db.commit(); return {"id":inv.id,"status":"completed","demo":True}
 
 @router.get("/investigations", dependencies=[Depends(require_api_key)])
-def list_investigations(db: Session=Depends(get_db)):
+def list_investigations(db:Session=Depends(get_db)):
     q=db.execute(select(Investigation).order_by(Investigation.created_at.desc()).limit(50)); return [{"id":x.id,"target":x.target,"status":x.status,"risk_score":x.risk_score,"risk_level":x.risk_level,"created_at":x.created_at} for x in q.scalars()]
 
 def load(inv_id,db):
@@ -144,4 +144,6 @@ def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
 
 @router.delete("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
 def delete_inv(inv_id:int,db:Session=Depends(get_db)):
-    load(inv_id,db); db.execute(delete(Investigation).where(Investigation.id==inv_id)); db.commit(); return {"deleted":True}
+    result=db.execute(delete(Investigation).where(Investigation.id==inv_id)); db.commit()
+    if result.rowcount != 1: raise HTTPException(404,"Investigation not found")
+    return {"deleted":True}
