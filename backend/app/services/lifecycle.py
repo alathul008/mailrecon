@@ -71,7 +71,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
             execution_heartbeat_at=now,
             completed_at=None,
         )
-        .execution_options(synchronize_session=False)
+        .execution_options(synchronize_session="fetch")
     )
     db.commit()
     if result.rowcount != 1:
