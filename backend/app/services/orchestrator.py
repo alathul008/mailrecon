@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
-from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED
+from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
 from app.osint.dns import resolve
 from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, RDAPProvider
 from app.providers.ollama import OllamaProvider
@@ -74,8 +74,8 @@ async def run_investigation(inv_id:int):
             analysis=analyze_email(inv.target)
             inv.normalized_email=analysis["email"]; inv.username=analysis["username"]; inv.domain=analysis["domain"]; inv.status="running"; db.commit()
             add_findings(db,inv_id,[
-                finding("MailRecon","email",analysis["email"],1.0,"info",notes="Normalized and syntax-validated target. Evidence state: observed."),
-                finding("MailRecon","classification",f"provider={analysis['provider']}; type={'Disposable' if analysis['disposable'] else 'Role-based' if analysis['role_based'] else 'Personal/Business unknown'}",0.95,"info",notes="Classification, not an identity verdict. Evidence state: observed."),
+                finding("MailRecon","email",analysis["email"],1.0,"info",notes=f"Normalized and syntax-validated target. Evidence state: {EVIDENCE_OBSERVED}."),
+                finding("MailRecon","classification",f"provider={analysis['provider']}; type={'Disposable' if analysis['disposable'] else 'Role-based' if analysis['role_based'] else 'Personal/Business unknown'}",0.95,"info",notes=f"Classification, not an identity verdict. Evidence state: {EVIDENCE_OBSERVED}."),
             ])
             set_module(db,inv_id,"email_validation","completed","Validated and normalized")
 
@@ -92,7 +92,7 @@ async def run_investigation(inv_id:int):
             analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
             fs=[]
             for k in ["A","AAAA","MX","NS","CNAME","SPF","DMARC"]:
-                if dns.get(k): fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),0.99,"info",notes="Public DNS response. Evidence state: observed."))
+                if dns.get(k): fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),0.99,"info",notes=f"Public DNS response. Evidence state: {EVIDENCE_OBSERVED}."))
             dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown"
             fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure."))
             add_findings(db,inv_id,fs)
@@ -134,7 +134,7 @@ async def run_investigation(inv_id:int):
             db.add_all([email_node,domain_node,user_node]); db.flush()
             db.add_all([
                 GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=domain_node.node_key,relation="uses",confidence=1),
-                GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation="registered_as",confidence=1),
+                GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation="derived_username",confidence=1),
             ])
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id)).all()
             seen=set()
