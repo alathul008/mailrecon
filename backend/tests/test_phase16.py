@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,9 @@ def sqlite_engine(url):
 
 
 def make_db(tmp_path):
-    return sqlite_engine(f"sqlite:///{tmp_path / 'phase16.db'}")
+    engine = sqlite_engine(f"sqlite:///{tmp_path / 'phase16.db'}")
+    Base.metadata.create_all(engine)
+    return engine
 
 
 def add_inv(db):
@@ -97,13 +99,10 @@ def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_s
         ))
     command.upgrade(cfg, "head")
 
-    inspector = inspect(engine)
-    investigation_fks = [fk for fk in inspector.get_foreign_keys("investigations") if fk["referred_table"] == "execution_attempts"]
-    assert investigation_fks
-    fk = investigation_fks[0]
-    assert tuple(fk["constrained_columns"]) == ("id", "execution_attempt_id")
-    assert tuple(fk["referred_columns"]) == ("investigation_id", "execution_attempt_id")
     with engine.connect() as conn:
+        rows = conn.exec_driver_sql("PRAGMA foreign_key_list(investigations)").fetchall()
+        assert any(row[2] == "execution_attempts" and row[3] == "id" and row[4] == "investigation_id" for row in rows)
+        assert any(row[2] == "execution_attempts" and row[3] == "execution_attempt_id" and row[4] == "execution_attempt_id" for row in rows)
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
         assert conn.execute(text("SELECT external_provider_disclosure FROM investigations WHERE execution_id='legacy-exec'")).scalar_one() == 1
 
@@ -204,12 +203,13 @@ def test_phase16_current_attempt_fk_allows_existing_delete_cycle(tmp_path):
         )
         db.add(attempt)
         db.flush()
+        attempt_id = attempt.id
         inv.execution_attempt_id = attempt.execution_attempt_id
         db.commit()
         db.execute(text("DELETE FROM investigations WHERE id=:id"), {"id": inv_id})
         db.commit()
         assert db.scalar(select(Investigation).where(Investigation.id == inv_id)) is None
-        assert db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.id == attempt.id)) is None
+        assert db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.id == attempt_id)) is None
 
 
 def test_phase16_graph_database_failure_preserves_previous_graph(tmp_path):
