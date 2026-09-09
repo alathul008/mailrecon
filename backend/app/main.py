@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
-from app.db.session import engine
 from app.api.routes import router
 from app.services.lifecycle import worker_loop
 from app.services.schema import ensure_schema
