@@ -67,6 +67,22 @@ def test_recovery_creates_new_attempt_but_preserves_logical_identity(tmp_path):
         assert attempt_a
         set_module(db, inv.id, "email_validation", "completed", token=token_a)
 
+        module_a = db.scalar(select(ModuleRun).where(
+            ModuleRun.investigation_id == inv.id,
+            ModuleRun.module == "email_validation",
+            ModuleRun.execution_attempt_id == attempt_a,
+        ))
+        assert module_a
+        module_a_snapshot = (
+            module_a.id,
+            module_a.execution_id,
+            module_a.execution_attempt_id,
+            module_a.status,
+            module_a.message,
+            module_a.started_at,
+            module_a.finished_at,
+        )
+
         add_findings(db, inv.id, [{
             "source": "test",
             "source_url": "https://example.test/evidence",
@@ -96,6 +112,18 @@ def test_recovery_creates_new_attempt_but_preserves_logical_identity(tmp_path):
         assert attempt_b and attempt_b != attempt_a
 
         set_module(db, inv.id, "email_validation", "running", token=token_b)
+        module_a_after_claim = db.scalar(select(ModuleRun).where(ModuleRun.id == module_a.id))
+        assert module_a_after_claim
+        assert (
+            module_a_after_claim.id,
+            module_a_after_claim.execution_id,
+            module_a_after_claim.execution_attempt_id,
+            module_a_after_claim.status,
+            module_a_after_claim.message,
+            module_a_after_claim.started_at,
+            module_a_after_claim.finished_at,
+        ) == module_a_snapshot
+
         set_module(db, inv.id, "email_validation", "completed", token=token_b)
         modules = db.scalars(select(ModuleRun).where(
             ModuleRun.investigation_id == inv.id,
