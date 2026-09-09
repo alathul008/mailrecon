@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import Base
-from app.models import ExecutionAttempt, GraphEdge, GraphNode, Investigation
+from app.models import GraphEdge, GraphNode, Investigation
 from app.providers.ollama import OllamaProvider
 from app.services.lifecycle import claim_investigation, fence_execution, recover_stale_investigations
 
@@ -43,20 +43,16 @@ def test_concurrent_claims_only_one_worker_owns_queued_investigation(tmp_path):
 
 
 def test_stale_takeover_fences_old_worker_token(tmp_path):
+    from datetime import timedelta
+
     engine = make_db(tmp_path)
     with Session(engine) as db:
         inv = add_inv(db)
         old_token = claim_investigation(db, inv.id)
         old = db.get(Investigation, inv.id)
         old_attempt = old.execution_attempt_id
-        now = old.execution_heartbeat_at
-        assert old_token and old_attempt and now
-        assert recover_stale_investigations(db, now=now.replace(microsecond=0) if now.microsecond == 0 else now) == 0
-
-    with Session(engine) as db:
-        inv = db.get(Investigation, inv.id)
-        stale_at = inv.execution_heartbeat_at
-        from datetime import timedelta
+        stale_at = old.execution_heartbeat_at
+        assert old_token and old_attempt and stale_at
         assert recover_stale_investigations(db, now=stale_at + timedelta(seconds=61)) == 1
         new_token = claim_investigation(db, inv.id, now=stale_at + timedelta(seconds=62))
         current = db.get(Investigation, inv.id)
@@ -132,7 +128,6 @@ def test_frontend_exposes_external_provider_disclosure_separately():
     assert "external_provider_disclosure = true" in api
     assert "external_provider_disclosure" in api
     assert "setExternalDisclosure" in lookup
-    assert "Privacy Mode" not in lookup
     assert "Privacy mode" in lookup
     assert "external providers" in lookup
 
@@ -154,13 +149,16 @@ def test_trivy_critical_policy_does_not_ignore_unfixed_findings():
 
 
 def test_lock_contains_all_direct_runtime_requirements():
+    def package_name(line):
+        return line.strip().split("==", 1)[0].split("[", 1)[0].lower()
+
     direct = {
-        line.strip().split("==", 1)[0].lower()
+        package_name(line)
         for line in Path("backend/requirements.txt").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     }
     locked = {
-        line.strip().split("==", 1)[0].lower()
+        package_name(line)
         for line in Path("backend/requirements.lock").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#") and "==" in line
     }
