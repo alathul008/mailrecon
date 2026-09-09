@@ -36,6 +36,8 @@ async def resolve(domain: str) -> dict:
     out["DMARC"] = [x for x in dmarc if x.lower().startswith("v=dmarc1")]
     out["DMARC_status"] = "ok" if dmarc_ok else "unavailable"
 
+    # dnspython does not expose a portable boolean from this simple resolver call;
+    # absence is therefore reported as unknown rather than a definitive failure.
     out["DNSSEC"] = []
     out["DNSSEC_status"] = "unknown"
     return out
