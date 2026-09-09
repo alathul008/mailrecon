@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
+import httpx
 
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json
-from app.providers.network import public_provider_client
+from app.providers.network import pinned_transport
 
 
 class RDAPProvider:
@@ -13,41 +14,30 @@ class RDAPProvider:
         settings = get_settings()
         url = f"https://rdap.org/domain/{domain}"
         try:
-            async with public_provider_client(url, timeout=settings.request_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
                 response = await client.get(url)
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No public RDAP registration returned")
             failure = classify_response(self.name, response)
-            if failure:
-                return failure
+            if failure: return failure
             data, parse_failure = parse_json(response, self.name)
-            if parse_failure:
-                return parse_failure
-            if not isinstance(data, dict):
-                return ProviderResult(self.name, "error", message="RDAP response was not an object")
+            if parse_failure: return parse_failure
+            if not isinstance(data, dict): return ProviderResult(self.name, "error", message="RDAP response was not an object")
             findings = []
             ldh_name = data.get("ldhName")
-            if isinstance(ldh_name, str) and ldh_name:
-                findings.append(finding(self.name, "domain", f"ldhName: {ldh_name}", 0.98, "info", url))
-            events = data.get("events", [])
-            if events is None:
-                events = []
-            if not isinstance(events, list):
-                return ProviderResult(self.name, "error", message="RDAP events field was malformed")
+            if isinstance(ldh_name, str) and ldh_name: findings.append(finding(self.name, "domain", f"ldhName: {ldh_name}", 0.98, "info", url))
+            events = data.get("events", []) or []
+            if not isinstance(events, list): return ProviderResult(self.name, "error", message="RDAP events field was malformed")
             for event in events:
-                if not isinstance(event, dict):
-                    continue
+                if not isinstance(event, dict): continue
                 action = event.get("eventAction")
                 if action in {"registration", "expiration", "last changed"}:
                     event_date = event.get("eventDate")
-                    if not isinstance(event_date, str):
-                        continue
+                    if not isinstance(event_date, str): continue
                     first_seen = None
                     try:
-                        parsed_event_date = datetime.fromisoformat(event_date.replace("Z", "+00:00"))
-                        first_seen = parsed_event_date if parsed_event_date.tzinfo else parsed_event_date.replace(tzinfo=timezone.utc)
-                    except ValueError:
-                        pass
+                        parsed = datetime.fromisoformat(event_date.replace("Z", "+00:00")); first_seen = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                    except ValueError: pass
                     findings.append(finding(self.name, "domain_event", f"{action}: {event_date}", 0.95, "info", url, raw_reference=event, first_seen=first_seen))
             return ProviderResult(self.name, "ok", findings=findings, message="Public RDAP metadata collected")
         except Exception as exc:
