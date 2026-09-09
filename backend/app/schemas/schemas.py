@@ -1,9 +1,10 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 class InvestigationCreate(BaseModel):
     email: EmailStr
     privacy_mode: bool = False
+    external_provider_disclosure: bool = True
 
 class ModuleOut(BaseModel):
     module: str
