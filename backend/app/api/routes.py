@@ -118,7 +118,7 @@ def timeline(inv_id:int,db:Session=Depends(get_db)):
             continue
         state=evidence_state(f)
         timestamp=timeline_timestamp(f)
-        key=(f.source,f.finding_type,f.value,state,timestamp)
+        key=(f.source,f.finding_type,f.value,state,timestamp,f.collected_at)
         if key in seen:
             continue
         seen.add(key)
