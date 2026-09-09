@@ -2,37 +2,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect, text
 from app.core.config import get_settings
-from app.db.session import engine, Base
 from app.api.routes import router
 from app.services.lifecycle import worker_loop
+from app.services.schema import ensure_schema
 import asyncio
 import os
 
 settings=get_settings()
 
 
-def ensure_execution_schema():
-    """Add Phase 6 execution columns to pre-migration local SQLite databases."""
-    inspector=inspect(engine)
-    columns={column["name"] for column in inspector.get_columns("investigations")}
-    missing={
-        "execution_token": "VARCHAR(64)",
-        "execution_started_at": "DATETIME",
-        "execution_heartbeat_at": "DATETIME",
-    }
-    with engine.begin() as connection:
-        for name, column_type in missing.items():
-            if name not in columns:
-                connection.execute(text(f"ALTER TABLE investigations ADD COLUMN {name} {column_type}"))
-
-
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     os.makedirs("data",exist_ok=True)
-    Base.metadata.create_all(engine)
-    ensure_execution_schema()
+    ensure_schema()
     stop_event=asyncio.Event()
     worker=asyncio.create_task(worker_loop(stop_event))
     try:

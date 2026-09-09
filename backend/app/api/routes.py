@@ -1,7 +1,7 @@
 import csv, io, json, html
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse, HTMLResponse
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, text
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
@@ -9,6 +9,7 @@ from app.schemas.schemas import InvestigationCreate
 from app.services.orchestrator import MODULES
 from app.reports.render import pdf_report
 from app.core.auth import require_api_key
+from app.core.config import get_settings
 
 router=APIRouter(prefix="/api")
 
@@ -26,6 +27,15 @@ def evidence_state(f):
 def timeline_timestamp(f):
     """Use earliest known observation time; fall back to collection time when absent."""
     return f.first_seen or f.collected_at
+
+def csv_safe(value):
+    """Neutralize spreadsheet formula cells without changing ordinary evidence."""
+    if not isinstance(value,str):
+        return value
+    first=value.lstrip(" \t\r\n")[:1]
+    if first in {"=","+","-","@"}:
+        return "'" + value
+    return value
 
 @router.get("/health")
 def health(): return {"status":"ok","service":"MailRecon"}
@@ -45,9 +55,19 @@ def providers():
 
 @router.post("/investigations", dependencies=[Depends(require_api_key)])
 async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
+    settings=get_settings()
+    # SQLite's immediate write transaction serializes competing queue admissions,
+    # making the depth limit a real resource bound rather than a best-effort count.
+    if db.bind.dialect.name == "sqlite":
+        db.execute(text("BEGIN IMMEDIATE"))
+    active_count=db.scalar(select(func.count()).select_from(Investigation).where(Investigation.status.in_(("queued","running")))) or 0
+    if active_count >= settings.max_queue_depth:
+        db.rollback()
+        raise HTTPException(429,"Investigation queue is full; retry later")
     inv=Investigation(target=str(payload.email),normalized_email=str(payload.email),username=str(payload.email).split("@",1)[0],domain=str(payload.email).split("@",1)[1].lower(),privacy_mode=payload.privacy_mode,status="queued")
     db.add(inv); db.commit(); db.refresh(inv)
-    for m in MODULES: db.add(ModuleRun(investigation_id=inv.id,module=m,status="queued"))
+    for m in MODULES:
+        db.add(ModuleRun(investigation_id=inv.id,execution_id=inv.execution_id,module=m,status="queued"))
     db.commit(); return {"id":inv.id,"status":"queued"}
 
 @router.post("/demo", dependencies=[Depends(require_api_key)])
@@ -135,7 +155,10 @@ def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor")); factors=[{"delta":int((f.notes or "").replace("Score delta: ","").strip() or 0),"reason":f.value} for f in fq.scalars()]
     if format=="json": return {"target":inv.target,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"findings":[{"source":f.source,"type":f.finding_type,"value":f.value,"confidence":f.confidence,"evidence_state":evidence_state(f),"severity":f.severity,"source_url":f.source_url,"notes":f.notes} for f in fs],"risk_factors":factors}
     if format=="csv":
-        s=io.StringIO(); w=csv.writer(s); w.writerow(["source","type","value","confidence","evidence_state","severity","source_url","notes"]); [w.writerow([f.source,f.finding_type,f.value,f.confidence,evidence_state(f),f.severity,f.source_url,f.notes]) for f in fs]; return Response(s.getvalue(),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.csv"'})
+        s=io.StringIO(); w=csv.writer(s); w.writerow(["source","type","value","confidence","evidence_state","severity","source_url","notes"])
+        for f in fs:
+            w.writerow([csv_safe(f.source),csv_safe(f.finding_type),csv_safe(f.value),f.confidence,csv_safe(evidence_state(f)),csv_safe(f.severity),csv_safe(f.source_url),csv_safe(f.notes)])
+        return Response(s.getvalue(),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.csv"'})
     if format=="html":
         body=f"<html><body><h1>MailRecon Report</h1><p>Target: {html.escape(inv.target)}</p><h2>Risk {inv.risk_score}/100 — {html.escape(str(inv.risk_level))}</h2><ul>"+"".join(f"<li><b>{html.escape(f.severity)}</b> {html.escape(f.finding_type)}: {html.escape(f.value)} ({f.confidence:.0%}; {html.escape(str(evidence_state(f)))})</li>" for f in fs)+"</ul><p>OSINT findings are probabilistic and should be independently verified. Numeric confidence is not an identity probability; evidence state describes the strength/type of correlation. Provider status is distinct from a negative finding.</p></body></html>"; return HTMLResponse(body)
     if format=="pdf":

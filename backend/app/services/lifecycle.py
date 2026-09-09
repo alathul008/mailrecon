@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, or_, select, update
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Investigation
+from app.models import Investigation, ModuleRun
 
 
 def utcnow():
@@ -67,8 +67,6 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         .values(
             status="running",
             execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
-            # A successful claim is one unique worker attempt, even when the
-            # stable logical execution identity survives stale recovery.
             execution_attempt_id=generated_attempt_id,
             execution_token=token,
             execution_started_at=now,
@@ -77,20 +75,38 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
         .execution_options(synchronize_session=False)
     )
-    db.commit()
     if result.rowcount != 1:
+        db.rollback()
         return None
 
     inv = db.get(Investigation, inv_id)
     if not inv:
+        db.rollback()
         raise RuntimeError("Investigation claim disappeared")
-    # Bulk UPDATEs intentionally avoid ORM synchronization; refresh the row so
-    # sessions configured with expire_on_commit=False still observe the claim.
     db.refresh(inv)
     if not inv.execution_id:
+        db.rollback()
         raise RuntimeError("Investigation claim has no durable logical execution identity")
     if not inv.execution_attempt_id:
+        db.rollback()
         raise RuntimeError("Investigation claim has incomplete execution-attempt provenance")
+
+    # API-created queued module rows intentionally have no worker attempt yet.
+    # Bind those rows to this claim atomically so the first worker updates the
+    # existing queue records instead of creating duplicate attempt rows. Rows
+    # from an earlier attempt remain untouched during stale recovery.
+    db.execute(
+        update(ModuleRun)
+        .where(
+            ModuleRun.investigation_id == inv_id,
+            ModuleRun.execution_attempt_id.is_(None),
+        )
+        .values(
+            execution_id=inv.execution_id,
+            execution_attempt_id=inv.execution_attempt_id,
+        )
+    )
+    db.commit()
     return token
 
 
