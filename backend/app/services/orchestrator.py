@@ -1,6 +1,10 @@
 import asyncio
+import hashlib
+import json
 from datetime import datetime, timezone
+
 from sqlalchemy import select, update
+
 from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
@@ -19,16 +23,39 @@ def utcnow(): return datetime.now(timezone.utc)
 
 
 def _require_ownership(db, inv_id, token):
-    if not execution_is_owned(db, inv_id, token):
+    if not execution_is_owned(db,inv_id,token):
         raise RuntimeError("Investigation execution lease is no longer owned")
+
+
+def _persistence_key(f):
+    """Stable semantic key for one finding within one durable execution/acquisition.
+
+    Collection time is deliberately excluded: a recovery may collect the same
+    evidence again at a different wall-clock time. Investigation/execution scope
+    keeps legitimate separate acquisitions distinct without global deduplication.
+    """
+    payload={
+        "source":f.get("source"),
+        "source_url":f.get("source_url"),
+        "finding_type":f.get("finding_type"),
+        "value":f.get("value"),
+        "first_seen":f.get("first_seen").isoformat() if f.get("first_seen") else None,
+    }
+    return hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()
 
 
 def set_module(db,inv_id,name,status,message=None,token=None):
     if token is not None:
         _require_ownership(db,inv_id,token)
-    m=db.scalar(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.module==name))
+    inv=db.get(Investigation,inv_id)
+    if not inv: return
+    m=db.scalar(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.execution_id==inv.execution_id,ModuleRun.module==name))
     if not m:
-        m=ModuleRun(investigation_id=inv_id,module=name); db.add(m)
+        m=db.scalar(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.module==name))
+    if not m:
+        m=ModuleRun(investigation_id=inv_id,execution_id=inv.execution_id,module=name); db.add(m)
+    else:
+        m.execution_id=inv.execution_id
     m.status=status; m.message=message
     if status=="running": m.started_at=utcnow()
     if status in {"completed","failed","skipped"}: m.finished_at=utcnow()
@@ -41,13 +68,40 @@ def add_findings(db,inv_id,fs,token=None):
         _require_ownership(db,inv_id,token)
     inv=db.get(Investigation,inv_id)
     if not inv: return
+    if not inv.execution_id:
+        raise RuntimeError("Investigation has no durable execution identity")
+    inserted=set()
     for f in fs:
         f=dict(f)
         if inv.privacy_mode:
             f["raw_reference"]=None
             if f.get("finding_type") == "profile_candidate" and EVIDENCE_POSSIBLE in (f.get("notes") or ""):
                 continue
-        db.add(Finding(investigation_id=inv_id,**f))
+        key=_persistence_key(f)
+        if key in inserted:
+            continue
+        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id,Finding.persistence_key==key))
+        if existing:
+            inserted.add(key)
+            continue
+        # Compatibility with findings created before Phase 7: they receive the
+        # execution_id during claim but have no persistence key. Match their
+        # semantic identity before inserting a new recovery result.
+        legacy=db.scalar(select(Finding.id).where(
+            Finding.investigation_id==inv_id,
+            Finding.execution_id==inv.execution_id,
+            Finding.persistence_key.is_(None),
+            Finding.source==f.get("source"),
+            Finding.source_url==f.get("source_url"),
+            Finding.finding_type==f.get("finding_type"),
+            Finding.value==f.get("value"),
+            Finding.first_seen==f.get("first_seen"),
+        ))
+        if legacy:
+            inserted.add(key)
+            continue
+        db.add(Finding(investigation_id=inv_id,execution_id=inv.execution_id,persistence_key=key,**f))
+        inserted.add(key)
     db.commit()
 
 
@@ -106,7 +160,7 @@ def mark_investigation_failed(db, inv_id, token, exc):
         return False
     inv.status="failed"; inv.completed_at=None; inv.execution_token=None; inv.execution_heartbeat_at=None
     db.commit()
-    for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)).all():
+    for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.execution_id==inv.execution_id)).all():
         if m.status == "running":
             m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
         elif m.status == "queued":
@@ -171,7 +225,7 @@ async def run_investigation(inv_id:int, token:str):
             if consistency: add_findings(db,inv_id,[consistency],token)
 
             set_module(db,inv_id,"risk_calculation","running",token=token)
-            rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id)).all()
+            rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id)).all()
             risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value,"notes":r.notes,"raw_reference":r.raw_reference} for r in rows])
             _require_ownership(db,inv_id,token)
             inv.risk_score=risk.score; inv.risk_level=risk.level; db.commit()
@@ -193,7 +247,7 @@ async def run_investigation(inv_id:int, token:str):
                 GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=domain_node.node_key,relation="uses",confidence=1),
                 GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation=DERIVED_USERNAME_RELATION,confidence=1),
             ])
-            rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id)).all()
+            rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id)).all()
             seen=set()
             for r in rows:
                 state=_finding_evidence_state(r)
