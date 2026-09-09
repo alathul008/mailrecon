@@ -62,6 +62,8 @@ def upgrade():
             "execution_attempts",
             ["id", "execution_attempt_id"],
             ["investigation_id", "execution_attempt_id"],
+            deferrable=True,
+            initially="DEFERRED",
         )
 
 
