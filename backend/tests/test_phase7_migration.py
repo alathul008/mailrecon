@@ -32,7 +32,7 @@ def test_phase7_migration_upgrades_legacy_schema_and_downgrades_cleanly(tmp_path
         assert conn.execute(text("SELECT execution_attempt_id FROM investigations WHERE id=:id"),{"id":investigation_id}).scalar_one() is None
         assert conn.execute(text("SELECT execution_attempt_id FROM findings WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one() is None
         assert conn.execute(text("SELECT execution_attempt_id FROM module_runs WHERE investigation_id=:id"),{"id":investigation_id}).scalar_one() is None
-        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0007"
+        assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()=="0008"
     command.downgrade(cfg,"0002")
     inspector=inspect(engine)
     assert "execution_id" not in {c["name"] for c in inspector.get_columns("investigations")}
