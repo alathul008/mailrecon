@@ -133,6 +133,12 @@ export function createInvestigation(
   });
 }
 
+export function deleteInvestigation(id: number) {
+  return request<{ id: number; status: 'deleted' }>(`/investigations/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 export function getInvestigation(id: number) {
   return request<Investigation>(`/investigations/${id}`);
 }
