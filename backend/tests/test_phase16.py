@@ -101,8 +101,9 @@ def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_s
 
     with engine.connect() as conn:
         rows = conn.exec_driver_sql("PRAGMA foreign_key_list(investigations)").fetchall()
-        assert any(row[2] == "execution_attempts" and row[3] == "id" and row[4] == "investigation_id" for row in rows)
-        assert any(row[2] == "execution_attempts" and row[3] == "execution_attempt_id" and row[4] == "execution_attempt_id" for row in rows)
+        pairs = {(row[2], row[3], row[4]) for row in rows}
+        assert ("execution_attempts", "id", "investigation_id") in pairs
+        assert ("execution_attempts", "execution_attempt_id", "execution_attempt_id") in pairs
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
         assert conn.execute(text("SELECT external_provider_disclosure FROM investigations WHERE execution_id='legacy-exec'")).scalar_one() == 1
 
