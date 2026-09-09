@@ -8,8 +8,6 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models import Investigation
 
-TERMINAL_STATES = {"completed", "failed"}
-
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -85,14 +83,13 @@ def heartbeat_investigation(db, inv_id: int, token: str, *, now=None) -> bool:
 
 
 def execution_is_owned(db, inv_id: int, token: str) -> bool:
-    row = db.scalar(
+    return db.scalar(
         select(Investigation.id).where(
             Investigation.id == inv_id,
             Investigation.status == "running",
             Investigation.execution_token == token,
         )
-    )
-    return row is not None
+    ) is not None
 
 
 def _queued_ids(db, limit: int) -> list[int]:
@@ -112,12 +109,7 @@ async def worker_loop(stop_event: asyncio.Event):
 
     async def execute(inv_id: int, token: str):
         from app.services.orchestrator import run_investigation
-        try:
-            await run_investigation(inv_id, token)
-        finally:
-            heartbeat_task = asyncio.current_task()
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
+        await run_investigation(inv_id, token)
 
     while not stop_event.is_set():
         with SessionLocal() as db:
