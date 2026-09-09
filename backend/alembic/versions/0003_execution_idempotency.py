@@ -23,9 +23,9 @@ def upgrade():
     conn.execute(sa.text("UPDATE findings SET execution_id=(SELECT execution_id FROM investigations WHERE investigations.id=findings.investigation_id) WHERE execution_id IS NULL"))
     conn.execute(sa.text("UPDATE module_runs SET execution_id=(SELECT execution_id FROM investigations WHERE investigations.id=module_runs.investigation_id) WHERE execution_id IS NULL"))
 
-    op.create_unique_constraint("uq_investigations_execution_id", "investigations", ["execution_id"])
-    op.create_unique_constraint("uq_findings_execution_persistence", "findings", ["investigation_id", "execution_id", "persistence_key"])
-    op.create_unique_constraint("uq_module_runs_execution_module", "module_runs", ["investigation_id", "execution_id", "module"])
+    op.create_index("uq_investigations_execution_id", "investigations", ["execution_id"], unique=True)
+    op.create_index("uq_findings_execution_persistence", "findings", ["investigation_id", "execution_id", "persistence_key"], unique=True)
+    op.create_index("uq_module_runs_execution_module", "module_runs", ["investigation_id", "execution_id", "module"], unique=True)
     op.create_index("ix_findings_execution_id", "findings", ["execution_id"])
     op.create_index("ix_module_runs_execution_id", "module_runs", ["execution_id"])
 
@@ -33,9 +33,9 @@ def upgrade():
 def downgrade():
     op.drop_index("ix_module_runs_execution_id", table_name="module_runs")
     op.drop_index("ix_findings_execution_id", table_name="findings")
-    op.drop_constraint("uq_module_runs_execution_module", "module_runs", type_="unique")
-    op.drop_constraint("uq_findings_execution_persistence", "findings", type_="unique")
-    op.drop_constraint("uq_investigations_execution_id", "investigations", type_="unique")
+    op.drop_index("uq_module_runs_execution_module", table_name="module_runs")
+    op.drop_index("uq_findings_execution_persistence", table_name="findings")
+    op.drop_index("uq_investigations_execution_id", table_name="investigations")
     op.drop_column("module_runs", "execution_id")
     op.drop_column("findings", "persistence_key")
     op.drop_column("findings", "execution_id")
