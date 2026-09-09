@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     github_token: str | None = None
     gitlab_token: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_allowed_hosts: str = "localhost,127.0.0.1,::1"
     ollama_model: str = "llama3.2:3b"
     enable_ollama: bool = False
     privacy_mode: bool = False

@@ -21,8 +21,8 @@ def _stale_before(now: datetime) -> datetime:
 def recover_stale_investigations(db, *, now=None) -> int:
     now = now or utcnow()
     stale_before = _stale_before(now)
-    result = db.execute(
-        update(Investigation)
+    stale = db.execute(
+        select(Investigation.id, Investigation.execution_attempt_id)
         .where(
             Investigation.status == "running",
             or_(
@@ -30,17 +30,44 @@ def recover_stale_investigations(db, *, now=None) -> int:
                 Investigation.execution_heartbeat_at < stale_before,
             ),
         )
-        .values(
-            status="queued",
-            execution_token=None,
-            execution_started_at=None,
-            execution_heartbeat_at=None,
-            completed_at=None,
+    ).all()
+    recovered = 0
+    for inv_id, stale_attempt_id in stale:
+        result = db.execute(
+            update(Investigation)
+            .where(
+                Investigation.id == inv_id,
+                Investigation.status == "running",
+                or_(
+                    Investigation.execution_heartbeat_at.is_(None),
+                    Investigation.execution_heartbeat_at < stale_before,
+                ),
+            )
+            .values(
+                status="queued",
+                execution_token=None,
+                execution_started_at=None,
+                execution_heartbeat_at=None,
+                completed_at=None,
+            )
+            .execution_options(synchronize_session=False)
         )
-        .execution_options(synchronize_session=False)
-    )
+        if result.rowcount != 1:
+            continue
+        if stale_attempt_id:
+            db.execute(
+                update(ModuleRun)
+                .where(
+                    ModuleRun.investigation_id == inv_id,
+                    ModuleRun.execution_attempt_id == stale_attempt_id,
+                    ModuleRun.status.in_(("queued", "running")),
+                )
+                .values(status="abandoned")
+                .execution_options(synchronize_session=False)
+            )
+        recovered += 1
     db.commit()
-    return result.rowcount
+    return recovered
 
 
 def claim_investigation(db, inv_id: int, *, now=None) -> str | None:

@@ -40,6 +40,19 @@ def csv_safe(value):
         return "'" + value
     return value
 
+def module_projection(module, current_attempt_id):
+    """Expose historical attempt provenance without treating it as current authority."""
+    return {
+        "module": module.module,
+        "status": module.status,
+        "message": module.message,
+        "execution_id": module.execution_id,
+        "execution_attempt_id": module.execution_attempt_id,
+        "current": bool(current_attempt_id and module.execution_attempt_id == current_attempt_id),
+        "started_at": module.started_at,
+        "finished_at": module.finished_at,
+    }
+
 @router.get("/health")
 def health(): return {"status":"ok","service":"MailRecon"}
 
@@ -102,7 +115,7 @@ def load(inv_id,db):
 
 @router.get("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
 def get_inv(inv_id:int,db:Session=Depends(get_db)):
-    inv,findings,mods=load(inv_id,db); return {"id":inv.id,"target":inv.target,"username":inv.username,"domain":inv.domain,"status":inv.status,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"created_at":inv.created_at,"completed_at":inv.completed_at,"modules":[{"module":m.module,"status":m.status,"message":m.message} for m in mods],"findings":[{"id":f.id,"source":f.source,"source_url":f.source_url,"finding_type":f.finding_type,"value":f.value,"confidence":f.confidence,"evidence_state":evidence_state(f),"severity":f.severity,"first_seen":f.first_seen,"last_seen":f.last_seen,"collected_at":f.collected_at,"notes":f.notes} for f in findings]}
+    inv,findings,mods=load(inv_id,db); return {"id":inv.id,"target":inv.target,"username":inv.username,"domain":inv.domain,"status":inv.status,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"created_at":inv.created_at,"completed_at":inv.completed_at,"execution_id":inv.execution_id,"execution_attempt_id":inv.execution_attempt_id,"modules":[module_projection(m, inv.execution_attempt_id) for m in mods],"findings":[{"id":f.id,"source":f.source,"source_url":f.source_url,"finding_type":f.finding_type,"value":f.value,"confidence":f.confidence,"evidence_state":evidence_state(f),"severity":f.severity,"first_seen":f.first_seen,"last_seen":f.last_seen,"collected_at":f.collected_at,"notes":f.notes} for f in findings]}
 
 @router.get("/investigations/{inv_id}/findings", dependencies=[Depends(require_api_key)])
 def findings(inv_id:int,db:Session=Depends(get_db)):
