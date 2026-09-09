@@ -262,14 +262,16 @@ async def test_github_timeout_and_malformed_json(monkeypatch):
 @pytest.mark.asyncio
 async def test_provider_timeout_uses_configured_value(monkeypatch):
     settings = hibp_module.get_settings()
-    original = settings.request_timeout_seconds
+    original_timeout = settings.request_timeout_seconds
+    original_key = settings.hibp_api_key
     settings.request_timeout_seconds = 3.25
     try:
         settings.hibp_api_key = "test-key"
         patch_client(monkeypatch, [hibp_module], status=404, json_data={})
         result = await HIBPProvider().run("user@example.com")
     finally:
-        settings.request_timeout_seconds = original
+        settings.request_timeout_seconds = original_timeout
+        settings.hibp_api_key = original_key
     assert result.status == "ok"
     assert FakeAsyncClient.seen_timeout == 3.25
 
