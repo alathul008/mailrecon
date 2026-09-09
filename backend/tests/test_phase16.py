@@ -39,12 +39,7 @@ def make_db(tmp_path):
 
 
 def add_inv(db):
-    inv = Investigation(
-        target="test@example.com",
-        normalized_email="test@example.com",
-        username="test",
-        domain="example.com",
-    )
+    inv = Investigation(target="test@example.com", normalized_email="test@example.com", username="test", domain="example.com")
     db.add(inv)
     db.commit()
     db.refresh(inv)
@@ -60,19 +55,8 @@ def test_new_investigation_disclosure_defaults_false_and_explicit_opt_in_is_pres
     engine = sqlite_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
-        model_default = Investigation(
-            target="default@example.com",
-            normalized_email="default@example.com",
-            username="default",
-            domain="example.com",
-        )
-        model_opt_in = Investigation(
-            target="optin@example.com",
-            normalized_email="optin@example.com",
-            username="optin",
-            domain="example.com",
-            external_provider_disclosure=True,
-        )
+        model_default = Investigation(target="default@example.com", normalized_email="default@example.com", username="default", domain="example.com")
+        model_opt_in = Investigation(target="optin@example.com", normalized_email="optin@example.com", username="optin", domain="example.com", external_provider_disclosure=True)
         db.add_all([model_default, model_opt_in])
         db.commit()
         db.refresh(model_default)
@@ -87,7 +71,7 @@ async def test_new_investigation_provider_execution_is_disabled_without_explicit
     assert [result.status for result in results] == ["disabled"] * 4
 
 
-def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_stored_disclosure(tmp_path):
+def test_phase16_migration_adds_investigation_current_attempt_guard_and_preserves_stored_disclosure(tmp_path):
     db_path = tmp_path / "valid.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "0007")
@@ -100,10 +84,9 @@ def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_s
     command.upgrade(cfg, "head")
 
     with engine.connect() as conn:
-        rows = conn.exec_driver_sql("PRAGMA foreign_key_list(investigations)").fetchall()
-        pairs = {(row[2], row[3], row[4]) for row in rows}
-        assert ("execution_attempts", "id", "investigation_id") in pairs
-        assert ("execution_attempts", "execution_attempt_id", "execution_attempt_id") in pairs
+        triggers = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='investigations'"))}
+        assert "trg_investigations_current_attempt_guard_insert" in triggers
+        assert "trg_investigations_current_attempt_guard_update" in triggers
         assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0008"
         assert conn.execute(text("SELECT external_provider_disclosure FROM investigations WHERE execution_id='legacy-exec'")).scalar_one() == 1
 
@@ -114,19 +97,10 @@ def test_phase16_migration_refuses_invalid_current_attempt_reference(tmp_path):
     command.upgrade(cfg, "0007")
     engine = sqlite_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) "
-            "VALUES ('one@example.com', 'one@example.com', 'one', 'example.com', 'running', 0, 0, CURRENT_TIMESTAMP, 'exec-one', 'attempt-two')"
-        ))
-        conn.execute(text(
-            "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) "
-            "VALUES ('two@example.com', 'two@example.com', 'two', 'example.com', 'queued', 0, 0, CURRENT_TIMESTAMP, 'exec-two', NULL)"
-        ))
+        conn.execute(text("INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) VALUES ('one@example.com', 'one@example.com', 'one', 'example.com', 'running', 0, 0, CURRENT_TIMESTAMP, 'exec-one', 'attempt-two')"))
+        conn.execute(text("INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) VALUES ('two@example.com', 'two@example.com', 'two', 'example.com', 'queued', 0, 0, CURRENT_TIMESTAMP, 'exec-two', NULL)"))
         inv_two = conn.execute(text("SELECT id FROM investigations WHERE execution_id='exec-two'")).scalar_one()
-        conn.execute(text(
-            "INSERT INTO execution_attempts (investigation_id, execution_id, execution_attempt_id, status, started_at) "
-            "VALUES (:inv, 'exec-two', 'attempt-two', 'completed', CURRENT_TIMESTAMP)"
-        ), {"inv": inv_two})
+        conn.execute(text("INSERT INTO execution_attempts (investigation_id, execution_id, execution_attempt_id, status, started_at) VALUES (:inv, 'exec-two', 'attempt-two', 'completed', CURRENT_TIMESTAMP)"), {"inv": inv_two})
 
     with pytest.raises(RuntimeError, match="does not belong to that investigation"):
         command.upgrade(cfg, "head")
@@ -140,17 +114,10 @@ def test_phase16_current_attempt_fk_rejects_cross_investigation_reference(tmp_pa
     cfg = migration_config(db_path)
     command.upgrade(cfg, "head")
     engine = sqlite_engine(f"sqlite:///{db_path}")
-
     with Session(engine) as db:
         first = add_inv(db)
         second = add_inv(db)
-        attempt = ExecutionAttempt(
-            investigation_id=second.id,
-            execution_id=second.execution_id,
-            execution_attempt_id="attempt-second",
-            status="running",
-        )
-        db.add(attempt)
+        db.add(ExecutionAttempt(investigation_id=second.id, execution_id=second.execution_id, execution_attempt_id="attempt-second", status="running"))
         db.commit()
         first.execution_attempt_id = "attempt-second"
         with pytest.raises(IntegrityError):
@@ -163,21 +130,10 @@ def test_phase16_current_attempt_fk_allows_belonging_attempt_and_preserves_histo
     cfg = migration_config(db_path)
     command.upgrade(cfg, "head")
     engine = sqlite_engine(f"sqlite:///{db_path}")
-
     with Session(engine) as db:
         inv = add_inv(db)
-        attempt_one = ExecutionAttempt(
-            investigation_id=inv.id,
-            execution_id=inv.execution_id,
-            execution_attempt_id="attempt-one",
-            status="abandoned",
-        )
-        attempt_two = ExecutionAttempt(
-            investigation_id=inv.id,
-            execution_id=inv.execution_id,
-            execution_attempt_id="attempt-two",
-            status="running",
-        )
+        attempt_one = ExecutionAttempt(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-one", status="abandoned")
+        attempt_two = ExecutionAttempt(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-two", status="running")
         db.add_all([attempt_one, attempt_two])
         db.flush()
         inv.execution_attempt_id = attempt_two.execution_attempt_id
@@ -192,16 +148,10 @@ def test_phase16_current_attempt_fk_allows_existing_delete_cycle(tmp_path):
     cfg = migration_config(db_path)
     command.upgrade(cfg, "head")
     engine = sqlite_engine(f"sqlite:///{db_path}")
-
     with Session(engine) as db:
         inv = add_inv(db)
         inv_id = inv.id
-        attempt = ExecutionAttempt(
-            investigation_id=inv.id,
-            execution_id=inv.execution_id,
-            execution_attempt_id="attempt-delete",
-            status="completed",
-        )
+        attempt = ExecutionAttempt(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-delete", status="completed")
         db.add(attempt)
         db.flush()
         attempt_id = attempt.id
@@ -223,7 +173,6 @@ def test_phase16_graph_database_failure_preserves_previous_graph(tmp_path):
             GraphEdge(investigation_id=inv.id, source="email:test@example.com", target="domain:example.com", relation="uses", confidence=1.0),
         ])
         db.commit()
-
         try:
             db.query(GraphEdge).filter(GraphEdge.investigation_id == inv.id).delete(synchronize_session=False)
             db.query(GraphNode).filter(GraphNode.investigation_id == inv.id).delete(synchronize_session=False)
@@ -233,7 +182,6 @@ def test_phase16_graph_database_failure_preserves_previous_graph(tmp_path):
             pytest.fail("graph rebuild should have failed on duplicate identity")
         except IntegrityError:
             db.rollback()
-
         nodes = db.scalars(select(GraphNode).where(GraphNode.investigation_id == inv.id)).all()
         edges = db.scalars(select(GraphEdge).where(GraphEdge.investigation_id == inv.id)).all()
         assert [(n.node_key, n.label) for n in nodes] == [("email:test@example.com", "test@example.com"), ("domain:example.com", "example.com")]
@@ -249,7 +197,6 @@ def test_phase16_graph_non_database_failure_rolls_back_previous_graph(tmp_path):
             GraphEdge(investigation_id=inv.id, source="email:test@example.com", target="domain:example.com", relation="uses", confidence=1.0),
         ])
         db.commit()
-
         try:
             db.query(GraphEdge).filter(GraphEdge.investigation_id == inv.id).delete(synchronize_session=False)
             db.query(GraphNode).filter(GraphNode.investigation_id == inv.id).delete(synchronize_session=False)
@@ -258,7 +205,6 @@ def test_phase16_graph_non_database_failure_rolls_back_previous_graph(tmp_path):
             raise ValueError("deterministic graph-build failure")
         except ValueError:
             db.rollback()
-
         nodes = db.scalars(select(GraphNode).where(GraphNode.investigation_id == inv.id)).all()
         edges = db.scalars(select(GraphEdge).where(GraphEdge.investigation_id == inv.id)).all()
         assert [(n.node_key, n.label) for n in nodes] == [("email:test@example.com", "test@example.com")]
