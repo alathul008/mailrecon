@@ -10,6 +10,13 @@ async def _resolve(resolver, name, rdtype):
         return [], False
 
 
+def record_presence(values, status):
+    """Return True/False for an answered DNS query, None when unavailable."""
+    if status != "ok":
+        return None
+    return bool(values)
+
+
 async def resolve(domain: str) -> dict:
     resolver = dns.asyncresolver.Resolver()
     resolver.lifetime = 4.0

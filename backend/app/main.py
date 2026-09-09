@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 from app.core.config import get_settings
 from app.api.routes import router
 from app.services.lifecycle import worker_loop
@@ -10,6 +11,7 @@ import asyncio
 import os
 
 settings=get_settings()
+MAX_REQUEST_BODY_SIZE = 1_048_576
 
 
 @asynccontextmanager
@@ -25,24 +27,12 @@ async def lifespan(app:FastAPI):
         await worker
 
 app=FastAPI(title="MailRecon API",version="1.0.0",description="Local-first defensive email intelligence platform",lifespan=lifespan)
+app.add_middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_SIZE)
 app.add_middleware(CORSMiddleware,allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()],allow_credentials=True,allow_methods=["GET","POST","DELETE"],allow_headers=["*"])
 app.include_router(router)
 if os.path.isdir("/app/frontend/dist"):
     app.mount("/",StaticFiles(directory="/app/frontend/dist",html=True),name="frontend")
 
-
-@app.middleware("http")
-async def request_guards(request, call_next):
-    content_length = request.headers.get("content-length")
-    if content_length:
-        try:
-            if int(content_length) > 1_048_576:
-                from fastapi.responses import JSONResponse
-                return JSONResponse({"detail":"Request body too large"}, status_code=413)
-        except ValueError:
-            from fastapi.responses import JSONResponse
-            return JSONResponse({"detail":"Invalid Content-Length"}, status_code=400)
-    return await call_next(request)
 
 @app.middleware("http")
 async def security_headers(request, call_next):

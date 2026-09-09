@@ -53,7 +53,7 @@ def test_runtime_schema_bootstrap_reaches_head_and_detects_physical_drift(tmp_pa
     try:
         schema.ensure_schema()
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0004"
 
         with engine.begin() as conn:
             conn.execute(text("DROP INDEX ix_investigations_execution_attempt_id"))
@@ -100,6 +100,6 @@ def test_runtime_schema_bootstraps_unversioned_phase6_database(tmp_path, monkeyp
     try:
         schema.ensure_schema()
         with engine.connect() as conn:
-            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
+            assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0004"
     finally:
         settings.database_url = old_url

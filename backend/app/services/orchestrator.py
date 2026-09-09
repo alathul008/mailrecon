@@ -8,7 +8,7 @@ from sqlalchemy import select, update, or_
 from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
-from app.osint.dns import resolve
+from app.osint.dns import resolve, record_presence
 from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, RDAPProvider
 from app.providers.ollama import OllamaProvider
 from app.providers.base import finding
@@ -82,6 +82,20 @@ def set_module(db,inv_id,name,status,message=None,token=None):
     db.commit()
 
 
+def _structured_evidence_state(f):
+    state=f.get("evidence_state")
+    if isinstance(state,str) and state:
+        return state
+    notes=f.get("notes") or ""
+    marker="Evidence state: "
+    if marker in notes:
+        return notes.split(marker,1)[1].split(".",1)[0].strip() or None
+    raw=f.get("raw_reference")
+    if isinstance(raw,dict) and isinstance(raw.get("evidence_state"),str):
+        return raw["evidence_state"]
+    return None
+
+
 def add_findings(db,inv_id,fs,token=None):
     if not fs: return
     if token is not None:
@@ -100,9 +114,10 @@ def add_findings(db,inv_id,fs,token=None):
     inserted=set()
     for f in fs:
         f=dict(f)
+        f["evidence_state"]=_structured_evidence_state(f)
         if inv.privacy_mode:
             f["raw_reference"]=None
-            if f.get("finding_type") == "profile_candidate" and EVIDENCE_POSSIBLE in (f.get("notes") or ""):
+            if f.get("finding_type") == "profile_candidate" and f.get("evidence_state") == EVIDENCE_POSSIBLE:
                 continue
         key=_persistence_key(f)
         if key in inserted:
@@ -146,7 +161,10 @@ async def run_providers(email: str, domain: str, candidates: list[str]):
 
 
 def _finding_evidence_state(row):
-    notes=row.notes or ""
+    state=getattr(row,"evidence_state",None)
+    if state:
+        return state
+    notes=getattr(row,"notes",None) or ""
     marker="Evidence state: "
     if marker in notes:
         return notes.split(marker,1)[1].split(".",1)[0].strip()
@@ -234,8 +252,8 @@ async def run_investigation(inv_id:int, token:str):
             set_module(db,inv_id,"dns_analysis","running",token=token)
             dns=await resolve(inv.domain)
             _require_ownership(db,inv_id,token)
-            analysis["has_dmarc"]=dns.get("has_dmarc")
-            analysis["has_spf"]=dns.get("has_spf")
+            analysis["has_dmarc"]=record_presence(dns.get("DMARC",[]), dns.get("DMARC_status"))
+            analysis["has_spf"]=record_presence(dns.get("SPF",[]), dns.get("SPF_status"))
             dnssec=dns.get("DNSSEC")
             analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
             fs=[]
@@ -265,7 +283,7 @@ async def run_investigation(inv_id:int, token:str):
 
             set_module(db,inv_id,"risk_calculation","running",token=token)
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id)).all()
-            risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value,"notes":r.notes,"raw_reference":r.raw_reference} for r in rows])
+            risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value,"notes":r.notes,"evidence_state":r.evidence_state,"raw_reference":r.raw_reference} for r in rows])
             _capture_owned_execution(db,inv_id,token)
             inv.risk_score=risk.score; inv.risk_level=risk.level; db.commit()
             add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_factor",f["reason"],1.0,"high" if f["delta"]>10 else "medium" if f["delta"]>0 else "info",notes=f"Score delta: {f['delta']:+d}; dimension={f['dimension']}") for f in risk.factors],token)

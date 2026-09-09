@@ -43,6 +43,7 @@ class Finding(Base):
     value: Mapped[str] = mapped_column(Text)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     severity: Mapped[str] = mapped_column(String(16), default="info")
+    evidence_state: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     first_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)

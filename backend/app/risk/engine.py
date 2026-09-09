@@ -17,11 +17,14 @@ def _level(score: int) -> str:
 
 
 def _evidence_state(finding: dict) -> str | None:
-    """Read semantic evidence state independently from numeric confidence."""
+    """Read structured semantic evidence state, with legacy compatibility fallback."""
+    state = finding.get("evidence_state")
+    if isinstance(state, str) and state:
+        return state
     notes = finding.get("notes") or ""
     marker = "Evidence state: "
     if marker in notes:
-        return notes.split(marker, 1)[1].split(".", 1)[0].strip()
+        return notes.split(marker, 1)[1].split(".", 1)[0].strip() or None
     raw = finding.get("raw_reference")
     if isinstance(raw, dict) and isinstance(raw.get("evidence_state"), str):
         return raw["evidence_state"]

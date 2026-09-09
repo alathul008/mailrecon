@@ -17,6 +17,8 @@ router=APIRouter(prefix="/api")
 TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach"}
 
 def evidence_state(f):
+    if f.evidence_state:
+        return f.evidence_state
     notes=f.notes or ""
     marker="Evidence state: "
     if marker in notes:
