@@ -48,6 +48,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     token = secrets.token_hex(24)
     stale_before = _stale_before(now)
     generated_execution_id = str(uuid.uuid4())
+    generated_attempt_id = str(uuid.uuid4())
     result = db.execute(
         update(Investigation)
         .where(
@@ -65,35 +66,38 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
         .values(
             status="running",
+            # execution_id is the stable logical acquisition identity.
             execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
+            # Every successful claim is a distinct worker execution attempt.
+            execution_attempt_id=generated_attempt_id,
             execution_token=token,
             execution_started_at=now,
             execution_heartbeat_at=now,
             completed_at=None,
         )
-        .execution_options(synchronize_session="fetch")
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     if result.rowcount != 1:
         return None
 
-    execution_id = db.scalar(select(Investigation.execution_id).where(Investigation.id == inv_id))
-    if not execution_id:
-        raise RuntimeError("Investigation claim has no durable execution identity")
+    inv = db.get(Investigation, inv_id)
+    if not inv or not inv.execution_id or not inv.execution_attempt_id:
+        raise RuntimeError("Investigation claim has incomplete execution provenance")
 
-    # Legacy Phase 6 rows did not carry execution provenance. Once this
-    # investigation is claimed, attach its durable execution identity to all
-    # existing children so a recovery cannot create an untraceable second run.
+    # Legacy Phase 6/early Phase 7 rows did not carry execution provenance.
+    # Attach them to the first actual worker attempt; later recovery attempts
+    # receive a new attempt identity and leave prior provenance untouched.
     db.execute(
         update(Finding)
         .where(Finding.investigation_id == inv_id, Finding.execution_id.is_(None))
-        .values(execution_id=execution_id)
+        .values(execution_id=inv.execution_id, execution_attempt_id=inv.execution_attempt_id)
         .execution_options(synchronize_session=False)
     )
     db.execute(
         update(ModuleRun)
         .where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_id.is_(None))
-        .values(execution_id=execution_id)
+        .values(execution_id=inv.execution_id, execution_attempt_id=inv.execution_attempt_id)
         .execution_options(synchronize_session=False)
     )
     db.commit()
