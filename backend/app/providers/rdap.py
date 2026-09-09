@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 
-import httpx
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import classify_exception, classify_response, parse_json
+from app.providers.network import public_provider_client
 
 
 class RDAPProvider:
@@ -13,8 +13,7 @@ class RDAPProvider:
         settings = get_settings()
         url = f"https://rdap.org/domain/{domain}"
         try:
-            validate_provider_url(url)
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False) as client:
+            async with public_provider_client(url, timeout=settings.request_timeout_seconds) as client:
                 response = await client.get(url)
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No public RDAP registration returned")
@@ -26,12 +25,10 @@ class RDAPProvider:
                 return parse_failure
             if not isinstance(data, dict):
                 return ProviderResult(self.name, "error", message="RDAP response was not an object")
-
             findings = []
             ldh_name = data.get("ldhName")
             if isinstance(ldh_name, str) and ldh_name:
                 findings.append(finding(self.name, "domain", f"ldhName: {ldh_name}", 0.98, "info", url))
-
             events = data.get("events", [])
             if events is None:
                 events = []
@@ -51,18 +48,7 @@ class RDAPProvider:
                         first_seen = parsed_event_date if parsed_event_date.tzinfo else parsed_event_date.replace(tzinfo=timezone.utc)
                     except ValueError:
                         pass
-                    findings.append(
-                        finding(
-                            self.name,
-                            "domain_event",
-                            f"{action}: {event_date}",
-                            0.95,
-                            "info",
-                            url,
-                            raw_reference=event,
-                            first_seen=first_seen,
-                        )
-                    )
+                    findings.append(finding(self.name, "domain_event", f"{action}: {event_date}", 0.95, "info", url, raw_reference=event, first_seen=first_seen))
             return ProviderResult(self.name, "ok", findings=findings, message="Public RDAP metadata collected")
         except Exception as exc:
             return classify_exception(self.name, exc)
