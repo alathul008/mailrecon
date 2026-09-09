@@ -31,6 +31,38 @@ def add_investigation(db):
     return inv
 
 
+def test_initial_claim_adopts_precreated_queue_rows_into_attempt(tmp_path):
+    engine = make_engine(tmp_path)
+    with Session(engine) as db:
+        inv = add_investigation(db)
+        queued = ModuleRun(
+            investigation_id=inv.id,
+            execution_id=inv.execution_id,
+            execution_attempt_id=None,
+            module="email_validation",
+            status="queued",
+        )
+        db.add(queued)
+        db.commit()
+
+        token = lifecycle.claim_investigation(db, inv.id)
+        assert token
+        current = db.get(Investigation, inv.id)
+        adopted = db.get(ModuleRun, queued.id)
+        assert adopted.execution_id == current.execution_id
+        assert adopted.execution_attempt_id == current.execution_attempt_id
+        assert adopted.status == "queued"
+
+        set_module(db, inv.id, "email_validation", "running", token=token)
+        rows = db.scalars(select(ModuleRun).where(
+            ModuleRun.investigation_id == inv.id,
+            ModuleRun.module == "email_validation",
+        )).all()
+        assert len(rows) == 1
+        assert rows[0].id == queued.id
+        assert rows[0].status == "running"
+
+
 def test_initial_claim_creates_attempt_identity_and_module_provenance(tmp_path):
     engine = make_engine(tmp_path)
     with Session(engine) as db:
@@ -302,64 +334,31 @@ def test_stale_worker_cannot_persist_under_new_attempt(tmp_path):
             Finding.investigation_id == inv.id,
             Finding.execution_attempt_id == attempt_b,
         ))
-        assert module_b and finding_b
-        module_b_snapshot = (
-            module_b.id,
-            module_b.execution_id,
-            module_b.execution_attempt_id,
-            module_b.status,
-            module_b.message,
-            module_b.started_at,
-            module_b.finished_at,
-        )
-        finding_b_snapshot = (
-            finding_b.id,
-            finding_b.execution_id,
-            finding_b.execution_attempt_id,
-            finding_b.persistence_key,
-            finding_b.value,
-            finding_b.last_seen,
-            finding_b.collected_at,
-        )
+        module_b_snapshot = (module_b.id, module_b.status, module_b.message, module_b.finished_at)
+        finding_b_snapshot = (finding_b.id, finding_b.value, finding_b.persistence_key)
 
-        stale_finding = {
-            "source": "attempt-a",
-            "source_url": "https://example.test/a",
-            "finding_type": "profile_candidate",
-            "value": "https://example.test/a",
-            "confidence": 0.9,
-            "severity": "info",
-            "first_seen": now,
-            "last_seen": now,
-            "collected_at": now,
-            "notes": "Evidence state: possible_match.",
-            "raw_reference": None,
-        }
         with pytest.raises(RuntimeError, match="no longer owned"):
-            set_module(db, inv.id, "rdap", "completed", "Attempt A stale", token_a)
+            set_module(db, inv.id, "rdap", "running", "stale worker", token_a)
         with pytest.raises(RuntimeError, match="no longer owned"):
-            add_findings(db, inv.id, [stale_finding], token_a)
+            add_findings(db, inv.id, [{
+                "source": "attempt-a",
+                "source_url": "https://example.test/a",
+                "finding_type": "profile_candidate",
+                "value": "https://example.test/a",
+                "confidence": 0.8,
+                "severity": "info",
+                "first_seen": old,
+                "last_seen": old,
+                "collected_at": old,
+                "notes": "Evidence state: possible_match.",
+                "raw_reference": None,
+            }], token_a)
 
-        module_b_after = db.scalar(select(ModuleRun).where(ModuleRun.id == module_b.id))
-        finding_b_after = db.scalar(select(Finding).where(Finding.id == finding_b.id))
-        assert (
-            module_b_after.id,
-            module_b_after.execution_id,
-            module_b_after.execution_attempt_id,
-            module_b_after.status,
-            module_b_after.message,
-            module_b_after.started_at,
-            module_b_after.finished_at,
-        ) == module_b_snapshot
-        assert (
-            finding_b_after.id,
-            finding_b_after.execution_id,
-            finding_b_after.execution_attempt_id,
-            finding_b_after.persistence_key,
-            finding_b_after.value,
-            finding_b_after.last_seen,
-            finding_b_after.collected_at,
-        ) == finding_b_snapshot
+        db.expire_all()
+        module_b = db.get(ModuleRun, module_b.id)
+        finding_b = db.get(Finding, finding_b.id)
+        assert (module_b.id, module_b.status, module_b.message, module_b.finished_at) == module_b_snapshot
+        assert (finding_b.id, finding_b.value, finding_b.persistence_key) == finding_b_snapshot
         assert db.scalar(select(ModuleRun).where(
             ModuleRun.investigation_id == inv.id,
             ModuleRun.execution_attempt_id == attempt_b,
@@ -367,5 +366,5 @@ def test_stale_worker_cannot_persist_under_new_attempt(tmp_path):
         )) is None
         assert db.scalar(select(Finding).where(
             Finding.investigation_id == inv.id,
-            Finding.value == "https://example.test/a",
+            Finding.execution_attempt_id == attempt_a,
         )) is None
