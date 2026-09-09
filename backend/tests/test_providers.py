@@ -10,10 +10,12 @@ from app.providers.github import GitHubProvider
 from app.providers.gravatar import GravatarProvider
 from app.providers.hibp import HIBPProvider
 from app.providers.rdap import RDAPProvider
+from app.providers.ollama import OllamaProvider, validate_ollama_url
 from app.providers import github as github_module
 from app.providers import gravatar as gravatar_module
 from app.providers import hibp as hibp_module
 from app.providers import rdap as rdap_module
+from app.providers import ollama as ollama_module
 from app.providers import http as provider_http
 from app.services import orchestrator
 
@@ -340,3 +342,63 @@ async def test_rdap_ssrf_validation_failure_is_provider_error(monkeypatch):
     result = await RDAPProvider().run("example.com")
     assert result.status == "error"
     assert result.findings == []
+
+
+def test_ollama_endpoint_policy_accepts_localhost_and_explicit_private_host():
+    assert validate_ollama_url("http://127.0.0.1:11434", "localhost,127.0.0.1,::1") == "http://127.0.0.1:11434"
+    assert validate_ollama_url("http://192.168.1.50:11434", "localhost,127.0.0.1,::1,192.168.1.50") == "http://192.168.1.50:11434"
+    assert validate_ollama_url("https://ollama.internal:11434", "ollama.internal") == "https://ollama.internal:11434"
+
+
+@pytest.mark.parametrize(
+    "url,allowed_hosts",
+    [
+        ("http://example.com:11434", "localhost,127.0.0.1,::1"),
+        ("https://169.254.169.254:11434", "localhost,127.0.0.1,::1"),
+        ("ftp://127.0.0.1:11434", "127.0.0.1"),
+        ("http://user:pass@127.0.0.1:11434", "127.0.0.1"),
+    ],
+)
+def test_ollama_endpoint_policy_rejects_untrusted_or_unsafe_urls(url, allowed_hosts):
+    with pytest.raises(ValueError):
+        validate_ollama_url(url, allowed_hosts)
+
+
+@pytest.mark.asyncio
+async def test_ollama_disabled_behavior_makes_no_request(monkeypatch):
+    settings = ollama_module.get_settings()
+    original_enabled = settings.enable_ollama
+    settings.enable_ollama = False
+    calls = []
+
+    class UnexpectedClient:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setattr(ollama_module.httpx, "AsyncClient", UnexpectedClient)
+    try:
+        result = await OllamaProvider().summarize("user@example.com", [])
+    finally:
+        settings.enable_ollama = original_enabled
+    assert result is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_ollama_network_failure_preserves_non_finding_failure_behavior(monkeypatch):
+    settings = ollama_module.get_settings()
+    original_enabled = settings.enable_ollama
+    original_url = settings.ollama_base_url
+    original_hosts = settings.ollama_allowed_hosts
+    settings.enable_ollama = True
+    settings.ollama_base_url = "http://127.0.0.1:11434"
+    settings.ollama_allowed_hosts = "127.0.0.1"
+    patch_client(monkeypatch, [ollama_module], exception=httpx.ConnectError("connection failed"))
+    monkeypatch.setattr(ollama_module.httpx, "AsyncClient", FakeAsyncClient)
+    try:
+        result = await OllamaProvider().summarize("user@example.com", [])
+    finally:
+        settings.enable_ollama = original_enabled
+        settings.ollama_base_url = original_url
+        settings.ollama_allowed_hosts = original_hosts
+    assert result is None
