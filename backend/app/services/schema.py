@@ -25,6 +25,11 @@ REQUIRED_EXECUTION_INDEXES = {
     "ix_module_runs_execution_attempt_id": ("module_runs", ("execution_attempt_id",), False),
 }
 
+REQUIRED_EXECUTION_FOREIGN_KEYS = {
+    "findings": {"fk_findings_execution_attempt_investigation": ("execution_attempts", ("investigation_id", "execution_attempt_id"), ("investigation_id", "execution_attempt_id"))},
+    "module_runs": {"fk_module_runs_execution_attempt_investigation": ("execution_attempts", ("investigation_id", "execution_attempt_id"), ("investigation_id", "execution_attempt_id"))},
+}
+
 REQUIRED_GRAPH_UNIQUENESS = {
     "graph_nodes": {"uq_graph_nodes_investigation_node_key": ("investigation_id", "node_key")},
     "graph_edges": {"uq_graph_edges_investigation_identity": ("investigation_id", "source", "target", "relation")},
@@ -60,7 +65,13 @@ def _validate_physical_schema() -> None:
         actual = indexes_by_table[table_name].get(index_name)
         if actual is None or tuple(actual["column_names"]) != expected_columns or bool(actual.get("unique", False)) != expected_unique: missing_or_drifted.append(index_name)
     if missing_or_drifted: raise RuntimeError(f"Database execution indexes diverge from Alembic contract: {sorted(missing_or_drifted)}")
-    graph_constraints = {table: {item["name"]: tuple(item["column_names"]) for item in inspector.get_unique_constraints(table)} for table in REQUIRED_GRAPH_UNIQUENESS}
+    foreign_key_drift = []
+    for table_name, constraints in REQUIRED_EXECUTION_FOREIGN_KEYS.items():
+        actual = {fk["name"]: (fk["referred_table"], tuple(fk["constrained_columns"]), tuple(fk["referred_columns"])) for fk in inspect(engine).get_foreign_keys(table_name)}
+        for name, expected in constraints.items():
+            if actual.get(name) != expected: foreign_key_drift.append(name)
+    if foreign_key_drift: raise RuntimeError(f"Database execution foreign keys diverge from Alembic contract: {sorted(foreign_key_drift)}")
+    graph_constraints = {table: {item["name"]: tuple(item["column_names"]) for item in inspect(engine).get_unique_constraints(table)} for table in REQUIRED_GRAPH_UNIQUENESS}
     graph_drift = []
     for table_name, constraints in REQUIRED_GRAPH_UNIQUENESS.items():
         for name, columns in constraints.items():
