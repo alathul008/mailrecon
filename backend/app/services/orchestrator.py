@@ -87,6 +87,7 @@ def _graph_relation(finding_type, evidence_state):
 
 
 async def _heartbeat_loop(inv_id, token, stop_event):
+    from app.core.config import get_settings
     interval=max(1.0, min(20.0, get_settings().execution_lease_seconds / 3))
     while not stop_event.is_set():
         try:
@@ -97,8 +98,24 @@ async def _heartbeat_loop(inv_id, token, stop_event):
                     return
 
 
+def mark_investigation_failed(db, inv_id, token, exc):
+    if not execution_is_owned(db,inv_id,token):
+        return False
+    inv=db.get(Investigation,inv_id)
+    if not inv:
+        return False
+    inv.status="failed"; inv.completed_at=None; inv.execution_token=None; inv.execution_heartbeat_at=None
+    db.commit()
+    for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)).all():
+        if m.status == "running":
+            m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
+        elif m.status == "queued":
+            m.status="skipped"; m.message="Not executed after investigation failure"; m.finished_at=utcnow()
+    db.commit()
+    return True
+
+
 async def run_investigation(inv_id:int, token:str):
-    from app.core.config import get_settings
     heartbeat_stop=asyncio.Event()
     heartbeat_task=asyncio.create_task(_heartbeat_loop(inv_id,token,heartbeat_stop))
     with SessionLocal() as db:
@@ -194,17 +211,7 @@ async def run_investigation(inv_id:int, token:str):
             if result.rowcount != 1: return
         except Exception as exc:
             try:
-                if execution_is_owned(db,inv_id,token):
-                    inv=db.get(Investigation,inv_id)
-                    if inv:
-                        inv.status="failed"; inv.completed_at=None; inv.execution_token=None; inv.execution_heartbeat_at=None
-                        db.commit()
-                        for m in db.scalars(select(ModuleRun).where(ModuleRun.investigation_id==inv_id)).all():
-                            if m.status == "running":
-                                m.status="failed"; m.message=f"Investigation failed: {type(exc).__name__}"; m.finished_at=utcnow()
-                            elif m.status == "queued":
-                                m.status="skipped"; m.message="Not executed after investigation failure"; m.finished_at=utcnow()
-                        db.commit()
+                mark_investigation_failed(db,inv_id,token,exc)
             except Exception:
                 db.rollback()
         finally:
