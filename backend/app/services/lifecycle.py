@@ -67,6 +67,8 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         .values(
             status="running",
             execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
+            # A successful claim is one unique worker attempt, even when the
+            # stable logical execution identity survives stale recovery.
             execution_attempt_id=generated_attempt_id,
             execution_token=token,
             execution_started_at=now,
