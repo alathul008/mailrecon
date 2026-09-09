@@ -19,12 +19,15 @@ def _stale_before(now: datetime) -> datetime:
 
 def recover_stale_investigations(db, *, now=None) -> int:
     now = now or utcnow()
+    stale_before = _stale_before(now)
     result = db.execute(
         update(Investigation)
         .where(
             Investigation.status == "running",
-            Investigation.execution_heartbeat_at.is_not(None),
-            Investigation.execution_heartbeat_at < _stale_before(now),
+            or_(
+                Investigation.execution_heartbeat_at.is_(None),
+                Investigation.execution_heartbeat_at < stale_before,
+            ),
         )
         .values(
             status="queued",
@@ -50,8 +53,10 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
                 Investigation.status == "queued",
                 and_(
                     Investigation.status == "running",
-                    Investigation.execution_heartbeat_at.is_not(None),
-                    Investigation.execution_heartbeat_at < stale_before,
+                    or_(
+                        Investigation.execution_heartbeat_at.is_(None),
+                        Investigation.execution_heartbeat_at < stale_before,
+                    ),
                 ),
             ),
         )
