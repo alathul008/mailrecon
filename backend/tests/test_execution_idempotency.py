@@ -89,7 +89,7 @@ def test_initial_claim_creates_attempt_identity_and_module_provenance(tmp_path):
 
 def test_recovery_creates_new_attempt_but_preserves_logical_identity(tmp_path):
     engine = make_engine(tmp_path)
-    now = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     old = now - timedelta(seconds=120)
     with Session(engine) as db:
         inv = add_investigation(db)
@@ -221,7 +221,7 @@ def test_separate_investigations_remain_distinct_acquisitions(tmp_path):
 
 def test_risk_is_invariant_when_recovery_replays_same_evidence(tmp_path):
     engine = make_engine(tmp_path)
-    now = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     old = now - timedelta(seconds=120)
     with Session(engine) as db:
         inv = add_investigation(db)
@@ -294,7 +294,7 @@ def test_persistence_key_is_scoped_to_logical_execution_not_global(tmp_path):
 
 def test_stale_worker_cannot_persist_under_new_attempt(tmp_path):
     engine = make_engine(tmp_path)
-    now = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     old = now - timedelta(seconds=120)
     with Session(engine) as db:
         inv = add_investigation(db)
