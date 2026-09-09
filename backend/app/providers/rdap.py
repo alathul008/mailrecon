@@ -1,4 +1,5 @@
 import httpx
+from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
 
@@ -7,10 +8,11 @@ class RDAPProvider:
     name = "RDAP"
 
     async def run(self, domain: str) -> ProviderResult:
+        settings = get_settings()
         url = f"https://rdap.org/domain/{domain}"
         try:
             validate_provider_url(url)
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False) as client:
                 response = await client.get(url)
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No public RDAP registration returned")
