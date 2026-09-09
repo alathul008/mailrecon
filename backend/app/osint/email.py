@@ -5,6 +5,15 @@ ROLE_PREFIXES = {"admin", "support", "info", "security", "contact", "sales", "he
 FREE_PROVIDERS = {"gmail.com": "Google", "outlook.com": "Microsoft", "hotmail.com": "Microsoft", "live.com": "Microsoft", "proton.me": "Proton", "protonmail.com": "Proton", "yahoo.com": "Yahoo", "icloud.com": "Apple"}
 DISPOSABLE_DOMAINS = {"mailinator.com", "10minutemail.com", "guerrillamail.com", "tempmail.com", "yopmail.com", "sharklasers.com", "getnada.com", "maildrop.cc"}
 
+# Evidence state is deliberately separate from numeric confidence. These values
+# describe what the evidence means, not a probability that an identity is true.
+EVIDENCE_DERIVED = "derived"
+EVIDENCE_POSSIBLE = "possible_match"
+EVIDENCE_CORROBORATED = "corroborated_match"
+EVIDENCE_SOURCE_ASSOCIATED = "source_associated"
+EVIDENCE_CONFIRMED = "confirmed"
+
+
 def analyze_email(raw: str) -> dict:
     try:
         v = validate_email(raw, check_deliverability=False)
@@ -20,8 +29,10 @@ def analyze_email(raw: str) -> dict:
     idn = any(ord(c) > 127 for c in domain)
     return {"email": email, "local": local, "domain": domain.lower(), "username": username, "provider": provider, "disposable": disposable, "role_based": role_based, "suspicious_chars": suspicious_chars, "idn": idn}
 
+
 def username_candidates(username: str) -> list[str]:
-    base = username.split("+",1)[0].lower()
+    """Generate deterministic hypotheses derived only from the email local-part."""
+    base = username.split("+", 1)[0].lower()
     parts = re.split(r"[._-]+", base)
     candidates = {base, "".join(parts), "_".join(parts), "-".join(parts)}
     return sorted(x for x in candidates if x)
