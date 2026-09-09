@@ -23,18 +23,20 @@ export type GraphData = {
   edges: GraphEdge[];
 };
 
+// Keep the bearer key for the current browser tab/session only; never persist it
+// across browser restarts in localStorage.
 export function getApiKey() {
-  return window.localStorage.getItem(API_KEY_STORAGE) || '';
+  return window.sessionStorage.getItem(API_KEY_STORAGE) || '';
 }
 
 export function setApiKey(key: string) {
   const normalized = key.trim();
-  if (normalized) window.localStorage.setItem(API_KEY_STORAGE, normalized);
-  else window.localStorage.removeItem(API_KEY_STORAGE);
+  if (normalized) window.sessionStorage.setItem(API_KEY_STORAGE, normalized);
+  else window.sessionStorage.removeItem(API_KEY_STORAGE);
 }
 
 export function clearApiKey() {
-  window.localStorage.removeItem(API_KEY_STORAGE);
+  window.sessionStorage.removeItem(API_KEY_STORAGE);
 }
 
 async function request<T>(

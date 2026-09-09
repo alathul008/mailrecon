@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import get_settings
 from app.db.session import Base, engine as app_engine
-from app.models import Finding, GraphEdge, GraphNode, Investigation, ModuleRun
+from app.models import ExecutionAttempt, Finding, GraphEdge, GraphNode, Investigation, ModuleRun
 from app.services import lifecycle
 from app.services.orchestrator import mark_investigation_failed
 
@@ -252,6 +252,15 @@ def test_stale_attempt_modules_are_abandoned_without_losing_provenance(tmp_path)
         current = db.get(Investigation, inv.id)
         first_execution_id = current.execution_id
         first_attempt_id = current.execution_attempt_id
+        historical_attempt = ExecutionAttempt(
+            investigation_id=inv.id,
+            execution_id=first_execution_id,
+            execution_attempt_id="other-attempt",
+            status="running",
+            started_at=old,
+        )
+        db.add(historical_attempt)
+        db.flush()
         running = ModuleRun(
             investigation_id=inv.id,
             execution_id=first_execution_id,
