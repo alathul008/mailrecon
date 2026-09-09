@@ -39,7 +39,15 @@ def claim_investigation(db,inv_id,*,now=None):
     if inv is not None:
         inv.execution_id=execution_id;inv.execution_attempt_id=execution_attempt_id;inv.execution_token=token;inv.status="running";inv.execution_started_at=now;inv.execution_heartbeat_at=now;inv.completed_at=None
     if stale_claim and old_attempt_id:_mark_attempt_abandoned(db,inv_id,old_attempt_id,now=now,reason="Superseded by a new worker claim")
-    _create_attempt(db,inv_id,execution_id,execution_attempt_id,now=now);db.execute(update(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.execution_attempt_id.is_(None)).values(execution_id=execution_id,execution_attempt_id=execution_attempt_id));db.commit();return token
+    _create_attempt(db,inv_id,execution_id,execution_attempt_id,now=now)
+    ambiguous=db.scalar(select(ModuleRun.id).where(ModuleRun.investigation_id==inv_id,ModuleRun.status=="queued",ModuleRun.execution_attempt_id.is_not(None),ModuleRun.execution_attempt_id!=execution_attempt_id).limit(1))
+    if ambiguous is not None:
+        db.rollback();raise RuntimeError("Investigation claim found queued ModuleRun with ambiguous execution-attempt provenance")
+    db.execute(update(ModuleRun).where(ModuleRun.investigation_id==inv_id,ModuleRun.status=="queued",ModuleRun.execution_attempt_id.is_(None)).values(execution_id=execution_id,execution_attempt_id=execution_attempt_id))
+    unassigned=db.scalar(select(ModuleRun.id).where(ModuleRun.investigation_id==inv_id,ModuleRun.status=="queued",ModuleRun.execution_attempt_id.is_(None)).limit(1))
+    if unassigned is not None:
+        db.rollback();raise RuntimeError("Investigation claim left a queued ModuleRun without execution-attempt provenance")
+    db.commit();return token
 def fence_execution(db,inv_id,token):
     r=db.execute(update(Investigation).where(Investigation.id==inv_id,Investigation.status=="running",Investigation.execution_token==token).values(execution_heartbeat_at=utcnow()).execution_options(synchronize_session=False))
     if r.rowcount!=1:db.rollback();raise RuntimeError("Investigation execution lease is no longer owned")
