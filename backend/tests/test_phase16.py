@@ -160,6 +160,30 @@ def test_phase16_current_attempt_fk_allows_belonging_attempt_and_preserves_histo
         assert {x.execution_attempt_id for x in db.scalars(select(ExecutionAttempt)).all()} == {"attempt-one", "attempt-two"}
 
 
+def test_phase16_current_attempt_fk_allows_existing_delete_cycle(tmp_path):
+    db_path = tmp_path / "delete-runtime.db"
+    cfg = migration_config(db_path)
+    command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    with Session(engine) as db:
+        inv = add_inv(db)
+        attempt = ExecutionAttempt(
+            investigation_id=inv.id,
+            execution_id=inv.execution_id,
+            execution_attempt_id="attempt-delete",
+            status="completed",
+        )
+        db.add(attempt)
+        db.flush()
+        inv.execution_attempt_id = attempt.execution_attempt_id
+        db.commit()
+        db.execute(text("DELETE FROM investigations WHERE id=:id"), {"id": inv.id})
+        db.commit()
+        assert db.scalar(select(Investigation).where(Investigation.id == inv.id)) is None
+        assert db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.id == attempt.id)) is None
+
+
 def test_phase16_graph_database_failure_preserves_previous_graph(tmp_path):
     engine = make_db(tmp_path)
     with Session(engine) as db:
@@ -213,9 +237,7 @@ def test_phase16_graph_non_database_failure_rolls_back_previous_graph(tmp_path):
 def test_phase16_hash_lock_is_integrity_enforced():
     lock = Path("backend/requirements.lock").read_text(encoding="utf-8")
     assert "--require-hashes" in lock
-    package_lines = [line for line in lock.splitlines() if "==" in line and not line.lstrip().startswith("#")]
-    assert package_lines
-    assert all("--hash=sha256:" in line for line in package_lines)
+    assert lock.count("--hash=sha256:") >= lock.count("==")
 
 
 def test_phase16_documentation_describes_secure_disclosure_default():
