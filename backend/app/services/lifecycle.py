@@ -30,7 +30,10 @@ def claim_investigation(db,inv_id,*,now=None):
     now=now or utcnow();token=secrets.token_hex(24);cutoff=_stale_before(now);generated_execution_id=str(uuid.uuid4());generated_attempt_id=str(uuid.uuid4());current=db.execute(select(Investigation.execution_id,Investigation.execution_attempt_id,Investigation.status,Investigation.execution_heartbeat_at).where(Investigation.id==inv_id)).one_or_none()
     if current is None:return None
     old_execution_id,old_attempt_id,old_status,old_heartbeat=current;old_heartbeat=_as_utc(old_heartbeat);stale_claim=old_status=="running" and (old_heartbeat is None or old_heartbeat<cutoff)
-    r=db.execute(update(Investigation).where(Investigation.id==inv_id,or_(Investigation.status=="queued",and_(Investigation.status=="running",or_(Investigation.execution_heartbeat_at.is_(None),Investigation.execution_heartbeat_at<cutoff)))).values(status="running",execution_id=func.coalesce(Investigation.execution_id,generated_execution_id),execution_attempt_id=generated_attempt_id,execution_token=token,execution_started_at=now,execution_heartbeat_at=now,completed_at=None).execution_options(synchronize_session=False))
+    execution_id=old_execution_id or generated_execution_id
+    _create_attempt(db,inv_id,execution_id,generated_attempt_id,now=now)
+    db.flush()
+    r=db.execute(update(Investigation).where(Investigation.id==inv_id,or_(Investigation.status=="queued",and_(Investigation.status=="running",or_(Investigation.execution_heartbeat_at.is_(None),Investigation.execution_heartbeat_at<cutoff)))).values(status="running",execution_id=execution_id,execution_attempt_id=generated_attempt_id,execution_token=token,execution_started_at=now,execution_heartbeat_at=now,completed_at=None).execution_options(synchronize_session=False))
     if r.rowcount!=1:db.rollback();return None
     refreshed=db.execute(select(Investigation.execution_id,Investigation.execution_attempt_id).where(Investigation.id==inv_id)).one_or_none()
     if not refreshed or not refreshed[0] or not refreshed[1]:db.rollback();raise RuntimeError("Investigation claim has incomplete execution provenance")
@@ -39,7 +42,6 @@ def claim_investigation(db,inv_id,*,now=None):
     if inv is not None:
         inv.execution_id=execution_id;inv.execution_attempt_id=execution_attempt_id;inv.execution_token=token;inv.status="running";inv.execution_started_at=now;inv.execution_heartbeat_at=now;inv.completed_at=None
     if stale_claim and old_attempt_id:_mark_attempt_abandoned(db,inv_id,old_attempt_id,now=now,reason="Superseded by a new worker claim")
-    _create_attempt(db,inv_id,execution_id,execution_attempt_id,now=now)
     ambiguous=db.scalar(select(ModuleRun.id).where(ModuleRun.investigation_id==inv_id,ModuleRun.status=="queued",ModuleRun.execution_attempt_id.is_not(None),ModuleRun.execution_attempt_id!=execution_attempt_id).limit(1))
     if ambiguous is not None:
         db.rollback();raise RuntimeError("Investigation claim found queued ModuleRun with ambiguous execution-attempt provenance")
