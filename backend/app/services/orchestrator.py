@@ -11,6 +11,7 @@ from app.providers.base import finding
 from app.risk.engine import calculate
 
 MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","breach_sources","risk_calculation","graph_build"]
+DERIVED_USERNAME_RELATION = "derived_username"
 
 def utcnow(): return datetime.now(timezone.utc)
 
@@ -134,7 +135,7 @@ async def run_investigation(inv_id:int):
             db.add_all([email_node,domain_node,user_node]); db.flush()
             db.add_all([
                 GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=domain_node.node_key,relation="uses",confidence=1),
-                GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation="derived_username",confidence=1),
+                GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=user_node.node_key,relation=DERIVED_USERNAME_RELATION,confidence=1),
             ])
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id)).all()
             seen=set()
