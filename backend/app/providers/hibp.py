@@ -1,11 +1,10 @@
 from datetime import datetime, timezone
 from urllib.parse import quote
 
-import httpx
-
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import classify_exception, classify_response, parse_json
+from app.providers.network import public_provider_client
 
 
 class HIBPProvider:
@@ -15,12 +14,10 @@ class HIBPProvider:
         settings = get_settings()
         if not settings.hibp_api_key:
             return ProviderResult(self.name, "unconfigured", message="Provider unavailable — configure HIBP_API_KEY")
-
         headers = {"hibp-api-key": settings.hibp_api_key, "user-agent": settings.hibp_user_agent}
         url = "https://haveibeenpwned.com/api/v3/breachedaccount/" + quote(email, safe="")
         try:
-            validate_provider_url(url)
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, headers=headers, follow_redirects=False) as client:
+            async with public_provider_client(url, timeout=settings.request_timeout_seconds, headers=headers) as client:
                 response = await client.get(url, params={"truncateResponse": "false"})
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No known breaches returned by HIBP")
@@ -32,7 +29,6 @@ class HIBPProvider:
                 return parse_failure
             if not isinstance(data, list):
                 return ProviderResult(self.name, "error", message="HIBP response was not a breach list")
-
             findings = []
             for breach in data:
                 if not isinstance(breach, dict):
@@ -48,24 +44,8 @@ class HIBPProvider:
                         first_seen = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed
                     except ValueError:
                         breach_date = None
-                raw_reference = {
-                    "domain": breach.get("Domain"),
-                    "date": breach_date,
-                    "data_classes": breach.get("DataClasses", []),
-                }
-                findings.append(
-                    finding(
-                        self.name,
-                        "breach",
-                        name,
-                        0.99,
-                        "high",
-                        "https://haveibeenpwned.com/",
-                        notes="Historical breach exposure metadata only; this does not establish active compromise, current credential validity, or password disclosure.",
-                        raw_reference=raw_reference,
-                        first_seen=first_seen,
-                    )
-                )
+                raw_reference = {"domain": breach.get("Domain"), "date": breach_date, "data_classes": breach.get("DataClasses", [])}
+                findings.append(finding(self.name, "breach", name, 0.99, "high", "https://haveibeenpwned.com/", notes="Historical breach exposure metadata only; this does not establish active compromise, current credential validity, or password disclosure.", raw_reference=raw_reference, first_seen=first_seen))
             return ProviderResult(self.name, "ok", findings=findings, message=f"{len(findings)} breach records returned")
         except Exception as exc:
             return classify_exception(self.name, exc)
