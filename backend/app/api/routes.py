@@ -17,6 +17,8 @@ router=APIRouter(prefix="/api")
 TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach"}
 
 def evidence_state(f):
+    if f.evidence_state:
+        return f.evidence_state
     notes=f.notes or ""
     marker="Evidence state: "
     if marker in notes:
@@ -59,8 +61,6 @@ async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
     settings=get_settings()
     if not allow_investigation_creation():
         raise HTTPException(429,"Investigation creation rate limit exceeded; retry later")
-    # SQLite's immediate write transaction serializes competing queue admissions,
-    # making the depth limit a real resource bound rather than a best-effort count.
     if db.bind.dialect.name == "sqlite":
         db.execute(text("BEGIN IMMEDIATE"))
     active_count=db.scalar(select(func.count()).select_from(Investigation).where(Investigation.status.in_(("queued","running")))) or 0
@@ -126,13 +126,6 @@ def risk(inv_id:int,db:Session=Depends(get_db)):
 
 @router.get("/investigations/{inv_id}/timeline", dependencies=[Depends(require_api_key)])
 def timeline(inv_id:int,db:Session=Depends(get_db)):
-    """Project approved evidence-bearing findings into a deterministic forensic timeline.
-
-    timestamp is first_seen when available, otherwise collected_at. collected_at
-    remains separate so collection time is never presented as fact occurrence time.
-    Only explicitly classified evidence types are projected; processing and
-    assessment findings remain available through their existing endpoints.
-    """
     _,fs,_=load(inv_id,db)
     events=[]
     seen=set()
