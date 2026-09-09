@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from collections import Counter
 
+from app.osint.email import EVIDENCE_CORROBORATED
+
+
 @dataclass
 class RiskResult:
     score: int
@@ -13,12 +16,24 @@ def _level(score: int) -> str:
     return "LOW" if score < 25 else "MEDIUM" if score < 50 else "HIGH" if score < 75 else "CRITICAL"
 
 
-def calculate(analysis: dict, findings: list[dict]) -> RiskResult:
-    """Explainable, evidence-weighted risk model.
+def _evidence_state(finding: dict) -> str | None:
+    """Read semantic evidence state independently from numeric confidence."""
+    notes = finding.get("notes") or ""
+    marker = "Evidence state: "
+    if marker in notes:
+        return notes.split(marker, 1)[1].split(".", 1)[0].strip()
+    raw = finding.get("raw_reference")
+    if isinstance(raw, dict) and isinstance(raw.get("evidence_state"), str):
+        return raw["evidence_state"]
+    return None
 
-    Dimensions intentionally cap independently so one noisy provider cannot
-    dominate the entire assessment. Negative posture signals are treated as
-    mitigations, not proof of safety.
+
+def calculate(analysis: dict, findings: list[dict]) -> RiskResult:
+    """Explainable, evidence-gated risk model.
+
+    Numeric confidence is evidence quality, not identity probability. Identity
+    exposure requires an explicit corroboration state; derived candidates and
+    possible matches cannot independently increase identity risk.
     """
     factors: list[dict] = []
     dims = {"identity_exposure": 0, "breach_exposure": 0, "domain_security": 0, "public_footprint": 0}
@@ -28,14 +43,19 @@ def calculate(analysis: dict, findings: list[dict]) -> RiskResult:
     if breach_count:
         delta = min(45, 18 + max(0, breach_count - 1) * 7)
         dims["breach_exposure"] += delta
-        factors.append({"delta": delta, "dimension": "breach_exposure", "reason": f"Known breach exposure ({breach_count} unique record(s))"})
+        factors.append({"delta": delta, "dimension": "breach_exposure", "reason": f"Known historical breach exposure ({breach_count} unique record(s))"})
 
-    profiles = [f for f in findings if f.get("finding_type") == "profile_candidate" and float(f.get("confidence", 0)) >= 0.6]
-    if profiles:
-        delta = min(25, 8 + max(0, len(profiles) - 1) * 5)
+    corroborated_profiles = [
+        f for f in findings
+        if f.get("finding_type") == "profile_candidate"
+        and _evidence_state(f) == EVIDENCE_CORROBORATED
+        and float(f.get("confidence", 0)) >= 0.6
+    ]
+    if corroborated_profiles:
+        delta = min(25, 8 + max(0, len(corroborated_profiles) - 1) * 5)
         dims["identity_exposure"] += delta
         dims["public_footprint"] += min(20, delta)
-        factors.append({"delta": delta, "dimension": "identity_exposure", "reason": f"Correlated public profile candidate(s): {len(profiles)}"})
+        factors.append({"delta": delta, "dimension": "identity_exposure", "reason": f"Corroborated public profile(s): {len(corroborated_profiles)}"})
 
     if analysis.get("disposable"):
         dims["identity_exposure"] += 12
@@ -47,7 +67,7 @@ def calculate(analysis: dict, findings: list[dict]) -> RiskResult:
     if analysis.get("has_dmarc") is False:
         dims["domain_security"] += 10
         factors.append({"delta": 10, "dimension": "domain_security", "reason": "DMARC not observed"})
-    else:
+    elif analysis.get("has_dmarc") is True:
         dims["domain_security"] = max(0, dims["domain_security"] - 5)
         factors.append({"delta": -5, "dimension": "domain_security", "reason": "DMARC observed (mitigating signal)"})
 
@@ -59,7 +79,6 @@ def calculate(analysis: dict, findings: list[dict]) -> RiskResult:
         factors.append({"delta": 4, "dimension": "domain_security", "reason": "DNSSEC not observed"})
 
     dims = {k: min(100, max(0, v)) for k, v in dims.items()}
-    # Weighted assessment: breach/identity matter more than domain posture.
     score = round(
         dims["identity_exposure"] * 0.30
         + dims["breach_exposure"] * 0.35

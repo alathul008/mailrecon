@@ -61,7 +61,7 @@ class HIBPProvider:
                         0.99,
                         "high",
                         "https://haveibeenpwned.com/",
-                        notes="Breach metadata only; no passwords are displayed.",
+                        notes="Historical breach exposure metadata only; this does not establish active compromise, current credential validity, or password disclosure.",
                         raw_reference=raw_reference,
                         first_seen=first_seen,
                     )

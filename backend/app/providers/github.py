@@ -3,6 +3,7 @@ import httpx
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.osint.email import EVIDENCE_CORROBORATED, EVIDENCE_POSSIBLE
 
 
 class GitHubProvider:
@@ -33,15 +34,24 @@ class GitHubProvider:
                     login = data.get("login")
                     if not isinstance(login, str) or not login:
                         continue
-                    score = 0.35
+
+                    # Username equality is only a weak hypothesis. An exact public
+                    # email match is corroborating evidence, not automatic identity confirmation.
+                    score = 0.2
+                    evidence_state = EVIDENCE_POSSIBLE
                     evidence = ["public GitHub username matches a generated candidate"]
                     public_email = data.get("email")
-                    if isinstance(public_email, str) and public_email.lower() == email.lower():
+                    if isinstance(public_email, str) and public_email.strip().lower() == email.lower():
                         score = 0.95
+                        evidence_state = EVIDENCE_CORROBORATED
                         evidence.append("public profile email exactly matches target")
                     name = data.get("name")
-                    if isinstance(name, str) and any(p in name.lower() for p in username.lower().replace("_", " ").replace("-", " ").split()):
-                        score = min(0.7, score + 0.2)
+                    if evidence_state == EVIDENCE_POSSIBLE and isinstance(name, str) and any(
+                        p in name.lower()
+                        for p in username.lower().replace("_", " ").replace("-", " ").split()
+                    ):
+                        score = 0.45
+                        evidence.append("profile display name overlaps a username token")
                     html_url = data.get("html_url")
                     if not isinstance(html_url, str) or not html_url:
                         html_url = username
@@ -53,8 +63,14 @@ class GitHubProvider:
                             score,
                             "info",
                             html_url if isinstance(html_url, str) and html_url.startswith("http") else None,
-                            notes="Possible match; username alone is not proof of identity.",
-                            raw_reference={"login": login, "name": name, "public_repos": data.get("public_repos"), "evidence": evidence},
+                            notes=f"Evidence state: {evidence_state}. Username correlation is not proof of human identity.",
+                            raw_reference={
+                                "login": login,
+                                "name": name,
+                                "public_repos": data.get("public_repos"),
+                                "evidence": evidence,
+                                "evidence_state": evidence_state,
+                            },
                         )
                     )
             return ProviderResult(self.name, "ok", findings=findings, message=f"{len(findings)} possible public profile matches")

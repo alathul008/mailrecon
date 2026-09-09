@@ -5,6 +5,7 @@ import httpx
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.osint.email import EVIDENCE_SOURCE_ASSOCIATED
 
 
 class GravatarProvider:
@@ -40,11 +41,44 @@ class GravatarProvider:
             profile_url = entry.get("profileUrl")
             thumbnail_url = entry.get("thumbnailUrl")
             if isinstance(display_name, str) and display_name:
-                findings.append(finding(self.name, "public_identity", display_name, 0.8, "info", url, notes="Returned by public Gravatar profile."))
+                findings.append(
+                    finding(
+                        self.name,
+                        "public_identity",
+                        display_name,
+                        0.8,
+                        "info",
+                        url,
+                        notes=f"Evidence state: {EVIDENCE_SOURCE_ASSOCIATED}. Gravatar association is not human-identity confirmation.",
+                        raw_reference={"evidence_state": EVIDENCE_SOURCE_ASSOCIATED},
+                    )
+                )
             if isinstance(profile_url, str) and profile_url:
-                findings.append(finding(self.name, "profile", profile_url, 0.95, "info", url))
+                findings.append(
+                    finding(
+                        self.name,
+                        "profile",
+                        profile_url,
+                        0.95,
+                        "info",
+                        url,
+                        notes=f"Evidence state: {EVIDENCE_SOURCE_ASSOCIATED}. Profile association is not human-identity confirmation.",
+                        raw_reference={"evidence_state": EVIDENCE_SOURCE_ASSOCIATED},
+                    )
+                )
             if isinstance(thumbnail_url, str) and thumbnail_url:
-                findings.append(finding(self.name, "avatar", thumbnail_url, 0.9, "info", url))
+                findings.append(
+                    finding(
+                        self.name,
+                        "avatar",
+                        thumbnail_url,
+                        0.9,
+                        "info",
+                        url,
+                        notes=f"Evidence state: {EVIDENCE_SOURCE_ASSOCIATED}. Avatar association is not human-identity confirmation.",
+                        raw_reference={"evidence_state": EVIDENCE_SOURCE_ASSOCIATED},
+                    )
+                )
             return ProviderResult(self.name, "ok", findings=findings, message="Public Gravatar profile found")
         except Exception as exc:
             return classify_exception(self.name, exc)
