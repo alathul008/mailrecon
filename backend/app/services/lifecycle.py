@@ -1,12 +1,13 @@
 import asyncio
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_, select, update
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.models import Investigation
+from app.models import Investigation, Finding, ModuleRun
 
 
 def utcnow():
@@ -45,6 +46,10 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     now = now or utcnow()
     token = secrets.token_hex(24)
     stale_before = _stale_before(now)
+    current = db.get(Investigation, inv_id)
+    if not current:
+        return None
+    execution_id = current.execution_id or str(uuid.uuid4())
     result = db.execute(
         update(Investigation)
         .where(
@@ -62,6 +67,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
         .values(
             status="running",
+            execution_id=execution_id,
             execution_token=token,
             execution_started_at=now,
             execution_heartbeat_at=now,
@@ -69,7 +75,24 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
     )
     db.commit()
-    return token if result.rowcount == 1 else None
+    if result.rowcount != 1:
+        return None
+
+    # Legacy Phase 6 rows did not carry execution provenance. Once this
+    # investigation is claimed, attach its durable execution identity to all
+    # existing children so a recovery cannot create an untraceable second run.
+    db.execute(
+        update(Finding)
+        .where(Finding.investigation_id == inv_id, Finding.execution_id.is_(None))
+        .values(execution_id=execution_id)
+    )
+    db.execute(
+        update(ModuleRun)
+        .where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_id.is_(None))
+        .values(execution_id=execution_id)
+    )
+    db.commit()
+    return token
 
 
 def heartbeat_investigation(db, inv_id: int, token: str, *, now=None) -> bool:
