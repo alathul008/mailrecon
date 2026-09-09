@@ -1,8 +1,9 @@
 import asyncio
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -36,6 +37,7 @@ def recover_stale_investigations(db, *, now=None) -> int:
             execution_heartbeat_at=None,
             completed_at=None,
         )
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     return result.rowcount
@@ -45,6 +47,8 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     now = now or utcnow()
     token = secrets.token_hex(24)
     stale_before = _stale_before(now)
+    generated_execution_id = str(uuid.uuid4())
+    generated_attempt_id = str(uuid.uuid4())
     result = db.execute(
         update(Investigation)
         .where(
@@ -62,14 +66,32 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
         .values(
             status="running",
+            execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
+            # A successful claim is one unique worker attempt, even when the
+            # stable logical execution identity survives stale recovery.
+            execution_attempt_id=generated_attempt_id,
             execution_token=token,
             execution_started_at=now,
             execution_heartbeat_at=now,
             completed_at=None,
         )
+        .execution_options(synchronize_session=False)
     )
     db.commit()
-    return token if result.rowcount == 1 else None
+    if result.rowcount != 1:
+        return None
+
+    inv = db.get(Investigation, inv_id)
+    if not inv:
+        raise RuntimeError("Investigation claim disappeared")
+    # Bulk UPDATEs intentionally avoid ORM synchronization; refresh the row so
+    # sessions configured with expire_on_commit=False still observe the claim.
+    db.refresh(inv)
+    if not inv.execution_id:
+        raise RuntimeError("Investigation claim has no durable logical execution identity")
+    if not inv.execution_attempt_id:
+        raise RuntimeError("Investigation claim has incomplete execution-attempt provenance")
+    return token
 
 
 def heartbeat_investigation(db, inv_id: int, token: str, *, now=None) -> bool:
@@ -82,6 +104,7 @@ def heartbeat_investigation(db, inv_id: int, token: str, *, now=None) -> bool:
             Investigation.execution_token == token,
         )
         .values(execution_heartbeat_at=now)
+        .execution_options(synchronize_session=False)
     )
     db.commit()
     return result.rowcount == 1
