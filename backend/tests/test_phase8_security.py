@@ -56,6 +56,7 @@ def test_runtime_schema_bootstrap_reaches_head_and_detects_physical_drift(tmp_pa
             assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "0003"
 
         with engine.begin() as conn:
+            conn.execute(text("DROP INDEX ix_investigations_execution_attempt_id"))
             conn.execute(text("ALTER TABLE investigations DROP COLUMN execution_attempt_id"))
 
         with pytest.raises(RuntimeError, match="columns diverge"):
