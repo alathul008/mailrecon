@@ -65,6 +65,28 @@ def test_runtime_schema_bootstrap_reaches_head_and_detects_physical_drift(tmp_pa
         settings.database_url = old_url
 
 
+def test_runtime_schema_rejects_missing_execution_integrity_index(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'index-drift.db'}")
+    monkeypatch.setattr(schema, "engine", engine)
+    settings = get_settings()
+    old_url = settings.database_url
+    settings.database_url = f"sqlite:///{tmp_path / 'index-drift.db'}"
+    try:
+        schema.ensure_schema()
+        with engine.begin() as conn:
+            conn.execute(text("DROP INDEX uq_module_runs_attempt_module"))
+
+        with engine.connect() as conn:
+            assert "execution_attempt_id" in {
+                column["name"] for column in schema.inspect(engine).get_columns("module_runs")
+            }
+
+        with pytest.raises(RuntimeError, match="execution indexes diverge"):
+            schema.ensure_schema()
+    finally:
+        settings.database_url = old_url
+
+
 def test_runtime_schema_bootstraps_unversioned_phase6_database(tmp_path, monkeypatch):
     db_path = tmp_path / "legacy.db"
     cfg = migration_config(db_path)
