@@ -8,6 +8,14 @@ def now(): return datetime.now(timezone.utc)
 
 class Investigation(Base):
     __tablename__ = "investigations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["investigation_id", "execution_attempt_id"],
+            ["execution_attempts.investigation_id", "execution_attempts.execution_attempt_id"],
+            name="fk_investigations_execution_attempt_investigation",
+            ondelete="SET NULL",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     target: Mapped[str] = mapped_column(String(320), index=True)
     normalized_email: Mapped[str] = mapped_column(String(320), index=True)
@@ -17,7 +25,7 @@ class Investigation(Base):
     risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     privacy_mode: Mapped[bool] = mapped_column(Boolean, default=False)
-    external_provider_disclosure: Mapped[bool] = mapped_column(Boolean, default=True)
+    external_provider_disclosure: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     execution_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
