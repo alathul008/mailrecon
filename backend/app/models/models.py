@@ -75,6 +75,7 @@ class ModuleRun(Base):
 
 class GraphNode(Base):
     __tablename__ = "graph_nodes"
+    __table_args__ = (UniqueConstraint("investigation_id", "node_key", name="uq_graph_nodes_investigation_node_key"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
     node_key: Mapped[str] = mapped_column(String(300))
@@ -84,6 +85,7 @@ class GraphNode(Base):
 
 class GraphEdge(Base):
     __tablename__ = "graph_edges"
+    __table_args__ = (UniqueConstraint("investigation_id", "source", "target", "relation", name="uq_graph_edges_investigation_identity"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
     source: Mapped[str] = mapped_column(String(300))

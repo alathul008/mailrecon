@@ -1,4 +1,5 @@
 import csv, io, json, html
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse, HTMLResponse
 from sqlalchemy import select, func, delete, text
@@ -34,6 +35,15 @@ def module_projection(module,current_attempt_id):
 
 def finding_projection(f,current_attempt_id):
     return {"id":f.id,"source":f.source,"source_url":f.source_url,"finding_type":f.finding_type,"value":f.value,"confidence":f.confidence,"evidence_state":evidence_state(f),"severity":f.severity,"execution_id":f.execution_id,"execution_attempt_id":f.execution_attempt_id,"current_attempt":bool(current_attempt_id and f.execution_attempt_id==current_attempt_id),"historical_attempt":bool(f.execution_attempt_id and current_attempt_id and f.execution_attempt_id!=current_attempt_id),"first_seen":f.first_seen,"last_seen":f.last_seen,"collected_at":f.collected_at,"notes":f.notes}
+
+def attempt_status(db,inv):
+    if not inv.execution_attempt_id: return None
+    from app.models import ExecutionAttempt
+    return db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.execution_attempt_id==inv.execution_attempt_id))
+
+def report_provenance(db,inv,generated_at=None):
+    attempt=attempt_status(db,inv)
+    return {"investigation_id":inv.id,"execution_id":inv.execution_id,"execution_attempt_id":inv.execution_attempt_id,"attempt_status":attempt.status if attempt else None,"attempt_started_at":attempt.started_at if attempt else inv.execution_started_at,"attempt_finished_at":attempt.finished_at if attempt else inv.completed_at,"recovered_at":attempt.recovered_at if attempt else None,"recovery_reason":attempt.recovery_reason if attempt else None,"external_provider_disclosure":inv.external_provider_disclosure,"privacy_mode":inv.privacy_mode,"report_generated_at":generated_at or datetime.now(timezone.utc),"graph_semantics":"current_derived_view","graph_provenance":"producing_execution_attempt"}
 
 @router.get("/health")
 def health(): return {"status":"ok","service":"MailRecon"}
@@ -110,20 +120,20 @@ def timeline(inv_id:int,db:Session=Depends(get_db)):
 
 @router.get("/investigations/{inv_id}/graph", dependencies=[Depends(require_api_key)])
 def graph(inv_id:int,db:Session=Depends(get_db)):
-    load(inv_id,db); nq=db.execute(select(GraphNode).where(GraphNode.investigation_id==inv_id)); eq=db.execute(select(GraphEdge).where(GraphEdge.investigation_id==inv_id)); return {"nodes":[{"id":n.node_key,"type":n.node_type,"label":n.label,"metadata":n.node_metadata} for n in nq.scalars()],"edges":[{"source":e.source,"target":e.target,"relation":e.relation,"confidence":e.confidence} for e in eq.scalars()]}
+    inv,_,_=load(inv_id,db); nodes=list(db.scalars(select(GraphNode).where(GraphNode.investigation_id==inv_id).order_by(GraphNode.node_key.asc(),GraphNode.id.asc())).all()); edges=list(db.scalars(select(GraphEdge).where(GraphEdge.investigation_id==inv_id).order_by(GraphEdge.source.asc(),GraphEdge.target.asc(),GraphEdge.relation.asc(),GraphEdge.id.asc())).all()); return {"semantics":"current_derived_view","provenance":{"type":"producing_execution_attempt","execution_id":inv.execution_id,"execution_attempt_id":inv.execution_attempt_id,"attempt_status":attempt_status(db,inv).status if attempt_status(db,inv) else None},"nodes":[{"id":n.node_key,"type":n.node_type,"label":n.label,"metadata":n.node_metadata} for n in nodes],"edges":[{"source":e.source,"target":e.target,"relation":e.relation,"confidence":e.confidence} for e in edges]}
 
 @router.get("/investigations/{inv_id}/report", dependencies=[Depends(require_api_key)])
 def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
-    inv,fs,_=load(inv_id,db); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor")); factors=[{"delta":int((f.notes or "").replace("Score delta: ","").strip() or 0),"reason":f.value} for f in fq.scalars()]
-    if format=="json": return {"target":inv.target,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"findings":[{**finding_projection(f,inv.execution_attempt_id)} for f in fs],"risk_factors":factors}
+    inv,fs,_=load(inv_id,db); generated_at=datetime.now(timezone.utc); provenance=report_provenance(db,inv,generated_at); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor")); factors=[{"delta":int((f.notes or "").replace("Score delta: ","").strip() or 0),"reason":f.value} for f in fq.scalars()]
+    if format=="json": return {"provenance":provenance,"target":inv.target,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"findings":[{**finding_projection(f,inv.execution_attempt_id)} for f in fs],"risk_factors":factors}
     if format=="csv":
-        s=io.StringIO(); w=csv.writer(s); w.writerow(["source","type","value","confidence","evidence_state","severity","execution_id","execution_attempt_id","current_attempt","source_url","notes"])
+        s=io.StringIO(); w=csv.writer(s); w.writerow(["report_generated_at","investigation_id","execution_id","execution_attempt_id","attempt_status","attempt_started_at","attempt_finished_at","recovered_at","recovery_reason","external_provider_disclosure","privacy_mode","source","type","value","confidence","evidence_state","severity","current_attempt","historical_attempt","source_url","notes"])
         for f in fs:
-            p=finding_projection(f,inv.execution_attempt_id); w.writerow([csv_safe(f.source),csv_safe(f.finding_type),csv_safe(f.value),f.confidence,csv_safe(evidence_state(f)),csv_safe(f.severity),csv_safe(f.execution_id),csv_safe(f.execution_attempt_id),p["current_attempt"],csv_safe(f.source_url),csv_safe(f.notes)])
+            p=finding_projection(f,inv.execution_attempt_id); w.writerow([provenance["report_generated_at"],provenance["investigation_id"],csv_safe(provenance["execution_id"]),csv_safe(provenance["execution_attempt_id"]),csv_safe(provenance["attempt_status"]),provenance["attempt_started_at"],provenance["attempt_finished_at"],provenance["recovered_at"],csv_safe(provenance["recovery_reason"]),provenance["external_provider_disclosure"],provenance["privacy_mode"],csv_safe(f.source),csv_safe(f.finding_type),csv_safe(f.value),f.confidence,csv_safe(evidence_state(f)),csv_safe(f.severity),p["current_attempt"],p["historical_attempt"],csv_safe(f.source_url),csv_safe(f.notes)])
         return Response(s.getvalue(),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.csv"'})
     if format=="html":
-        body=f"<html><body><h1>MailRecon Report</h1><p>Target: {html.escape(inv.target)}</p><h2>Risk {inv.risk_score}/100 — {html.escape(str(inv.risk_level))}</h2><ul>"+"".join(f"<li><b>{html.escape(f.severity)}</b> {html.escape(f.finding_type)}: {html.escape(f.value)} ({f.confidence:.0%}; {html.escape(str(evidence_state(f)))}; {'current' if f.execution_attempt_id == inv.execution_attempt_id else 'historical'})</li>" for f in fs)+"</ul><p>OSINT findings are probabilistic and should be independently verified. Numeric confidence is not an identity probability; evidence state describes the strength/type of correlation. Provider status is distinct from a negative finding.</p></body></html>"; return HTMLResponse(body)
-    if format=="pdf": return Response(pdf_report(inv,fs,factors).read(),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.pdf"'})
+        p=provenance; meta="".join(f"<li><b>{html.escape(str(k))}</b>: {html.escape(str(v))}</li>" for k,v in p.items()); body=f"<html><body><h1>MailRecon Report</h1><h2>Provenance</h2><ul>{meta}</ul><p>Target: {html.escape(inv.target)}</p><h2>Risk {inv.risk_score}/100 — {html.escape(str(inv.risk_level))}</h2><ul>"+"".join(f"<li><b>{html.escape(f.severity)}</b> {html.escape(f.finding_type)}: {html.escape(f.value)} ({f.confidence:.0%}; {html.escape(str(evidence_state(f)))}; {'current' if inv.execution_attempt_id and f.execution_attempt_id == inv.execution_attempt_id else 'historical' if f.execution_attempt_id else 'unspecified'})</li>" for f in fs)+"</ul><p>OSINT findings are probabilistic and should be independently verified. Numeric confidence is not an identity probability; evidence state describes the strength/type of correlation. Provider status is distinct from a negative finding.</p></body></html>"; return HTMLResponse(body)
+    if format=="pdf": return Response(pdf_report(inv,fs,factors,provenance).read(),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.pdf"'})
     raise HTTPException(400,"Unsupported format")
 
 @router.delete("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
