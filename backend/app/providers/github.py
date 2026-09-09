@@ -1,5 +1,3 @@
-import httpx
-
 from app.core.config import get_settings
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json
