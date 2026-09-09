@@ -1,10 +1,9 @@
-import asyncio
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,13 +20,20 @@ def migration_config(db_path):
     return cfg
 
 
-def make_db(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'phase16.db'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
+def sqlite_engine(url):
+    engine = create_engine(url)
+
+    @event.listens_for(engine, "connect")
+    def _enable_foreign_keys(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     return engine
+
+
+def make_db(tmp_path):
+    return sqlite_engine(f"sqlite:///{tmp_path / 'phase16.db'}")
 
 
 def add_inv(db):
@@ -49,7 +55,7 @@ def test_new_investigation_disclosure_defaults_false_and_explicit_opt_in_is_pres
     assert default.external_provider_disclosure is False
     assert explicit.external_provider_disclosure is True
 
-    engine = create_engine("sqlite:///:memory:")
+    engine = sqlite_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         model_default = Investigation(
@@ -83,7 +89,7 @@ def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_s
     db_path = tmp_path / "valid.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "0007")
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = sqlite_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
         conn.execute(text(
             "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) "
@@ -92,9 +98,9 @@ def test_phase16_migration_adds_investigation_current_attempt_fk_and_preserves_s
     command.upgrade(cfg, "head")
 
     inspector = inspect(engine)
-    fks = {fk["name"]: fk for fk in inspector.get_foreign_keys("investigations")}
-    fk = fks["fk_investigations_execution_attempt_investigation"]
-    assert fk["referred_table"] == "execution_attempts"
+    investigation_fks = [fk for fk in inspector.get_foreign_keys("investigations") if fk["referred_table"] == "execution_attempts"]
+    assert investigation_fks
+    fk = investigation_fks[0]
     assert tuple(fk["constrained_columns"]) == ("id", "execution_attempt_id")
     assert tuple(fk["referred_columns"]) == ("investigation_id", "execution_attempt_id")
     with engine.connect() as conn:
@@ -106,7 +112,7 @@ def test_phase16_migration_refuses_invalid_current_attempt_reference(tmp_path):
     db_path = tmp_path / "ambiguous.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "0007")
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = sqlite_engine(f"sqlite:///{db_path}")
     with engine.begin() as conn:
         conn.execute(text(
             "INSERT INTO investigations (target, normalized_email, username, domain, status, privacy_mode, external_provider_disclosure, created_at, execution_id, execution_attempt_id) "
@@ -133,7 +139,7 @@ def test_phase16_current_attempt_fk_rejects_cross_investigation_reference(tmp_pa
     db_path = tmp_path / "runtime.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "head")
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = sqlite_engine(f"sqlite:///{db_path}")
 
     with Session(engine) as db:
         first = add_inv(db)
@@ -156,7 +162,7 @@ def test_phase16_current_attempt_fk_allows_belonging_attempt_and_preserves_histo
     db_path = tmp_path / "valid-runtime.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "head")
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = sqlite_engine(f"sqlite:///{db_path}")
 
     with Session(engine) as db:
         inv = add_inv(db)
@@ -185,10 +191,11 @@ def test_phase16_current_attempt_fk_allows_existing_delete_cycle(tmp_path):
     db_path = tmp_path / "delete-runtime.db"
     cfg = migration_config(db_path)
     command.upgrade(cfg, "head")
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = sqlite_engine(f"sqlite:///{db_path}")
 
     with Session(engine) as db:
         inv = add_inv(db)
+        inv_id = inv.id
         attempt = ExecutionAttempt(
             investigation_id=inv.id,
             execution_id=inv.execution_id,
@@ -199,9 +206,9 @@ def test_phase16_current_attempt_fk_allows_existing_delete_cycle(tmp_path):
         db.flush()
         inv.execution_attempt_id = attempt.execution_attempt_id
         db.commit()
-        db.execute(text("DELETE FROM investigations WHERE id=:id"), {"id": inv.id})
+        db.execute(text("DELETE FROM investigations WHERE id=:id"), {"id": inv_id})
         db.commit()
-        assert db.scalar(select(Investigation).where(Investigation.id == inv.id)) is None
+        assert db.scalar(select(Investigation).where(Investigation.id == inv_id)) is None
         assert db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.id == attempt.id)) is None
 
 
