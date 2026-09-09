@@ -393,7 +393,7 @@ async def test_ollama_network_failure_preserves_non_finding_failure_behavior(mon
     settings.enable_ollama = True
     settings.ollama_base_url = "http://127.0.0.1:11434"
     settings.ollama_allowed_hosts = "127.0.0.1"
-    patch_client(monkeypatch, [ollama_module], exception=httpx.ConnectError("connection failed"))
+    FakeAsyncClient.exception = httpx.ConnectError("connection failed")
     monkeypatch.setattr(ollama_module.httpx, "AsyncClient", FakeAsyncClient)
     try:
         result = await OllamaProvider().summarize("user@example.com", [])
