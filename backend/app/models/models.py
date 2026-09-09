@@ -55,7 +55,9 @@ class ModuleRun(Base):
     __table_args__ = (UniqueConstraint("investigation_id", "execution_attempt_id", "module", name="uq_module_runs_attempt_module"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
+    # Logical acquisition identity retained for forensic grouping.
     execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Unique worker-attempt identity; this distinguishes A from recovered B.
     execution_attempt_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     module: Mapped[str] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(24), default="queued")
