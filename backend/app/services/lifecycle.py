@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
@@ -47,10 +47,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     now = now or utcnow()
     token = secrets.token_hex(24)
     stale_before = _stale_before(now)
-    current = db.get(Investigation, inv_id)
-    if not current:
-        return None
-    execution_id = current.execution_id or str(uuid.uuid4())
+    generated_execution_id = str(uuid.uuid4())
     result = db.execute(
         update(Investigation)
         .where(
@@ -68,7 +65,7 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
         )
         .values(
             status="running",
-            execution_id=execution_id,
+            execution_id=func.coalesce(Investigation.execution_id, generated_execution_id),
             execution_token=token,
             execution_started_at=now,
             execution_heartbeat_at=now,
@@ -79,6 +76,10 @@ def claim_investigation(db, inv_id: int, *, now=None) -> str | None:
     db.commit()
     if result.rowcount != 1:
         return None
+
+    execution_id = db.scalar(select(Investigation.execution_id).where(Investigation.id == inv_id))
+    if not execution_id:
+        raise RuntimeError("Investigation claim has no durable execution identity")
 
     # Legacy Phase 6 rows did not carry execution provenance. Once this
     # investigation is claimed, attach its durable execution identity to all
