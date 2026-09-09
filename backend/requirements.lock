@@ -1,46 +1,47 @@
 # MailRecon production dependency lock.
-# Keep this file as the single production install input for Docker and CI.
-# Versions are intentionally aligned with the existing direct requirements; no
-# application dependency upgrades are introduced by Phase 15.
-# Hashes are not embedded because platform-specific wheels differ; CI uses
-# pip-audit on this exact locked set.
+# Generated from the existing backend/requirements.txt resolver output on
+# CPython 3.13/Linux during Phase 15. Direct application requirements remain
+# unchanged; this file freezes the complete resolved runtime graph.
+# Hashes are not embedded because the graph contains platform-specific wheels;
+# CI runs pip-audit against this exact lock and Docker/CI consume this file.
 
 alembic==1.15.2
-annotated-types==0.7.0
-anyio==4.8.0
-certifi==2025.1.31
-click==8.1.8
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+chardet==7.6.0
+click==8.5.0
 dnspython==2.7.0
 email-validator==2.2.0
 fastapi==0.133.0
-greenlet==3.1.1
-h11==0.14.0
-httpcore==1.0.7
+greenlet==3.5.5
+h11==0.16.0
+httpcore==1.0.9
 httpx==0.28.1
-httptools==0.6.4
-idna==3.10
-iniconfig==2.0.0
-Mako==1.3.9
-MarkupSafe==3.0.2
-packaging==24.2
-pillow==11.1.0
-pluggy==1.5.0
-pydantic==2.10.6
-pydantic-core==2.27.2
+httptools==0.8.0
+idna==3.19
+iniconfig==2.3.0
+Mako==1.4.1
+MarkupSafe==3.0.3
+packaging==26.3
+pillow==12.3.0
+pluggy==1.6.0
+pydantic==2.13.5
+pydantic-core==2.46.5
 pydantic-settings==2.9.1
-Pygments==2.19.1
+Pygments==2.21.0
 pytest==9.0.3
 pytest-asyncio==1.3.0
-python-dotenv==1.0.1
+python-dotenv==1.2.3
 python-multipart==0.0.31
-PyYAML==6.0.2
+PyYAML==6.0.3
 reportlab==4.3.1
-sniffio==1.3.1
 SQLAlchemy==2.0.52
-starlette==1.0.1
-typing-extensions==4.12.2
-typing-inspection==0.4.1
+starlette==1.6.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4
 uvicorn==0.34.0
-uvloop==0.21.0
-watchfiles==1.0.4
-websockets==14.1
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==17.1
