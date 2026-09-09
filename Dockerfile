@@ -9,7 +9,7 @@ FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PYTHONPATH=/app/backend
 WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt && useradd --create-home --uid 10001 mailrecon
+RUN pip install --no-cache-dir -r requirements.txt && pip uninstall -y pip setuptools && useradd --create-home --uid 10001 mailrecon
 COPY backend ./backend
 COPY cli ./cli
 COPY --from=frontend /app/frontend/dist ./frontend/dist
