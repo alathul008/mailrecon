@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import uuid
-from sqlalchemy import DateTime, Float, Integer, String, Text, ForeignKey, JSON, Boolean, UniqueConstraint
+from sqlalchemy import DateTime, Float, Integer, String, Text, ForeignKey, ForeignKeyConstraint, JSON, Boolean, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.session import Base
 
@@ -41,7 +41,14 @@ class ExecutionAttempt(Base):
 
 class Finding(Base):
     __tablename__ = "findings"
-    __table_args__ = (UniqueConstraint("investigation_id", "execution_id", "persistence_key", name="uq_findings_execution_persistence"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["investigation_id", "execution_attempt_id"],
+            ["execution_attempts.investigation_id", "execution_attempts.execution_attempt_id"],
+            name="fk_findings_execution_attempt_investigation",
+        ),
+        UniqueConstraint("investigation_id", "execution_id", "persistence_key", name="uq_findings_execution_persistence"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
     execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
@@ -62,7 +69,14 @@ class Finding(Base):
 
 class ModuleRun(Base):
     __tablename__ = "module_runs"
-    __table_args__ = (UniqueConstraint("investigation_id", "execution_attempt_id", "module", name="uq_module_runs_attempt_module"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["investigation_id", "execution_attempt_id"],
+            ["execution_attempts.investigation_id", "execution_attempts.execution_attempt_id"],
+            name="fk_module_runs_execution_attempt_investigation",
+        ),
+        UniqueConstraint("investigation_id", "execution_attempt_id", "module", name="uq_module_runs_attempt_module"),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     investigation_id: Mapped[int] = mapped_column(ForeignKey("investigations.id", ondelete="CASCADE"), index=True)
     execution_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
