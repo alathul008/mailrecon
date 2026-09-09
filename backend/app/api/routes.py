@@ -10,6 +10,7 @@ from app.services.orchestrator import MODULES
 from app.reports.render import pdf_report
 from app.core.auth import require_api_key
 from app.core.config import get_settings
+from app.core.rate_limit import allow_investigation_creation
 
 router=APIRouter(prefix="/api")
 
@@ -56,6 +57,8 @@ def providers():
 @router.post("/investigations", dependencies=[Depends(require_api_key)])
 async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
     settings=get_settings()
+    if not allow_investigation_creation():
+        raise HTTPException(429,"Investigation creation rate limit exceeded; retry later")
     # SQLite's immediate write transaction serializes competing queue admissions,
     # making the depth limit a real resource bound rather than a best-effort count.
     if db.bind.dialect.name == "sqlite":
