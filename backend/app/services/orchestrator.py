@@ -88,11 +88,61 @@ def add_findings(db,inv_id,fs,token=None):
 def provider_finding(result):
     severity="warning" if result.status in {"error","rate_limited","unavailable"} else "info"
     return finding(result.provider,"provider_status",result.status,1.0,severity,notes=result.message or "Provider execution completed.",raw_reference={"status":result.status})
-async def run_providers(email: str,domain: str,candidates: list[str],*,allow_external: bool=True):
+
+class ProviderOwnershipLost(RuntimeError):
+    """Provider work was abandoned because the execution lease was lost."""
+
+async def _cancel_provider_tasks(tasks):
+    pending=[task for task in tasks if not task.done()]
+    for task in pending:task.cancel()
+    if pending:await asyncio.gather(*pending,return_exceptions=True)
+
+async def _provider_tasks_owned(inv_id,token,tasks,*,poll_interval=0.25):
+    while True:
+        pending=[task for task in tasks if not task.done()]
+        if not pending:return
+        await asyncio.sleep(poll_interval)
+        with SessionLocal() as db:
+            if not execution_is_owned(db,inv_id,token):
+                raise ProviderOwnershipLost("Provider work abandoned after execution ownership was lost")
+
+def _provider_tasks_outcome(tasks):
+    return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
+
+async def _run_provider_call(provider_call):
+    return await provider_call()
+
+async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     if not allow_external:
         message="External provider disclosure disabled for this investigation"
         return [ProviderResult("Gravatar","disabled",message=message),ProviderResult("RDAP","disabled",message=message),ProviderResult("GitHub","disabled",message=message),ProviderResult("Have I Been Pwned","disabled",message=message)]
-    return await asyncio.gather(GravatarProvider().run(email),RDAPProvider().run(domain),GitHubProvider().run(candidates,email),HIBPProvider().run(email),return_exceptions=True)
+    calls=[lambda:GravatarProvider().run(email),lambda:RDAPProvider().run(domain),lambda:GitHubProvider().run(candidates,email),lambda:HIBPProvider().run(email)]
+    tasks=[asyncio.create_task(_run_provider_call(call)) for call in calls]
+    if inv_id is None or token is None:return await asyncio.gather(*tasks,return_exceptions=True)
+    monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks))
+    gathered=None
+    try:
+        while True:
+            done,_=await asyncio.wait([*tasks,monitor],return_when=asyncio.FIRST_COMPLETED)
+            if monitor in done:
+                exc=monitor.exception()
+                if exc is not None:raise exc
+                break
+            if all(task.done() for task in tasks):
+                break
+        gathered=_provider_tasks_outcome(tasks)
+        try:
+            with SessionLocal() as db:_require_ownership(db,inv_id,token)
+        except RuntimeError as exc:
+            raise ProviderOwnershipLost(str(exc)) from exc
+        return gathered
+    finally:
+        if not monitor.done():
+            monitor.cancel()
+            try:await monitor
+            except asyncio.CancelledError:pass
+        await _cancel_provider_tasks(tasks)
+
 def _finding_evidence_state(row):
     state=getattr(row,"evidence_state",None)
     if state:return state
@@ -144,7 +194,7 @@ async def run_investigation(inv_id:int,token:str):
                 if dns.get(k):fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),.99,"info",notes=f"Public DNS response. Evidence state: {EVIDENCE_OBSERVED}."))
             dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown";fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure."));add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
             for n in ["gravatar","rdap","public_profile_discovery","breach_sources"]:set_module(db,inv_id,n,"running",token=token)
-            results=await run_providers(analysis["email"],analysis["domain"],candidates,allow_external=inv.external_provider_disclosure);_require_ownership(db,inv_id,token);mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("breach_sources",results[3])]
+            results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure);mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("breach_sources",results[3])]
             for name,res in mapping:
                 if isinstance(res,Exception):set_module(db,inv_id,name,"failed",f"Provider exception: {type(res).__name__}",token);add_findings(db,inv_id,[finding(name,"provider_status","error",1.0,"warning",notes=f"Provider raised {type(res).__name__}")],token)
                 else:add_findings(db,inv_id,[provider_finding(res),*res.findings],token);set_module(db,inv_id,name,"completed" if res.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",res.message,token)
