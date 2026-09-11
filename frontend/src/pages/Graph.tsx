@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, MiniMap, type Edge, type Node, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowRight, Crosshair, ExternalLink, Filter, Network, RotateCcw } from 'lucide-react';
+import { ArrowRight, Crosshair, ExternalLink, Filter, Network, RefreshCw, RotateCcw } from 'lucide-react';
 import { createInvestigation, getGraph, type GraphData } from '../services/api';
 import { graphEvidenceCandidates, graphNodeTypes, graphRelations, neighborhood, shortestPath, type GraphFilters } from '../services/graph';
 import type { Finding } from '../types';
@@ -17,16 +17,18 @@ export function Graph({ id, findings = [], onEvidence, onPivot }: { id: number; 
   const [focusId, setFocusId] = useState('');
   const [filters, setFilters] = useState<GraphFilters>(initialFilters);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [pivoting, setPivoting] = useState(false);
 
-  useEffect(() => {
-    let active = true;
+  const loadGraph = () => {
+    setLoading(true);
     setError('');
     setSelectedId('');
     setFocusId('');
-    getGraph(id).then((data) => { if (active) setGraph(data); }).catch((e) => { if (active) setError(e instanceof Error ? e.message : 'Unable to load graph'); });
-    return () => { active = false; };
-  }, [id]);
+    getGraph(id).then((data) => setGraph(data)).catch((e) => setError(e instanceof Error ? e.message : 'Unable to load graph')).finally(() => setLoading(false));
+  };
+
+  useEffect(() => { void loadGraph(); }, [id]);
 
   const visible = useMemo(() => {
     const allowedTypes = new Set(graph.nodes.filter((node) => filters.nodeType === 'all' || node.type === filters.nodeType).map((node) => node.id));
@@ -51,32 +53,12 @@ export function Graph({ id, findings = [], onEvidence, onPivot }: { id: number; 
     const focused = node.id === focusId;
     const dimmed = Boolean(focusId) && !neighborhoodIds.has(node.id);
     const confidence = node.metadata?.confidence;
-    return {
-      id: node.id,
-      position: { x: (index % 4) * 260, y: Math.floor(index / 4) * 170 },
-      data: {
-        label: (
-          <div className={`min-w-40 rounded-xl border px-4 py-3 text-xs shadow-xl ${selected || focused ? 'border-red-400/70 bg-[#171111]' : 'border-white/10 bg-[#101010]'} ${dimmed ? 'opacity-25' : ''}`}>
-            <div className="text-[9px] tracking-widest text-red-400">{node.type}</div>
-            <div className="mt-1 max-w-48 break-words text-white">{node.label}</div>
-            {typeof confidence === 'number' && <div className="mt-2 text-[10px] text-zinc-500">Confidence {Math.round(confidence * 100)}%</div>}
-          </div>
-        ),
-      },
-      style: { opacity: dimmed ? 0.25 : 1 },
-    };
+    return { id: node.id, position: { x: (index % 4) * 260, y: Math.floor(index / 4) * 170 }, data: { label: (<div className={`min-w-40 rounded-xl border px-4 py-3 text-xs shadow-xl ${selected || focused ? 'border-red-400/70 bg-[#171111]' : 'border-white/10 bg-[#101010]'} ${dimmed ? 'opacity-25' : ''}`}><div className="text-[9px] tracking-widest text-red-400">{node.type}</div><div className="mt-1 max-w-48 break-words text-white">{node.label}</div>{typeof confidence === 'number' && <div className="mt-2 text-[10px] text-zinc-500">Confidence {Math.round(confidence * 100)}%</div>}</div>) }, style: { opacity: dimmed ? 0.25 : 1 } };
   }), [visible.nodes, selectedId, focusId, neighborhoodIds]);
 
   const edges: Edge[] = useMemo(() => visible.edges.map((edge, index) => {
     const inPath = path.length > 1 && path.includes(edge.source) && path.includes(edge.target);
-    return {
-      id: `${edge.source}|${edge.target}|${edge.relation}|${index}`,
-      source: edge.source,
-      target: edge.target,
-      label: `${edge.relation} · ${Math.round(edge.confidence * 100)}%`,
-      animated: inPath,
-      style: { opacity: focusId && !neighborhoodIds.has(edge.source) && !neighborhoodIds.has(edge.target) ? 0.15 : 1 },
-    };
+    return { id: `${edge.source}|${edge.target}|${edge.relation}|${index}`, source: edge.source, target: edge.target, label: `${edge.relation} · ${Math.round(edge.confidence * 100)}%`, animated: inPath, style: { opacity: focusId && !neighborhoodIds.has(edge.source) && !neighborhoodIds.has(edge.target) ? 0.15 : 1 } };
   }), [visible.edges, path, focusId, neighborhoodIds]);
 
   const selectNode: NodeMouseHandler = (_event, node) => setSelectedId(node.id);
@@ -93,13 +75,14 @@ export function Graph({ id, findings = [], onEvidence, onPivot }: { id: number; 
   const selectedEvidenceState = selectedNode?.metadata?.evidence_state;
   const selectedSourceUrl = selectedNode?.metadata?.source_url;
 
+  if (loading) return <div className="grid min-h-[420px] place-items-center rounded-xl border border-white/8 bg-black/10 p-8 text-center"><div><RefreshCw className="mx-auto mb-3 animate-spin text-red-400" size={20}/><div className="text-sm text-zinc-400">Loading evidence graph…</div><div className="mt-1 text-xs text-zinc-600">Graph filters and lineage will be available when the investigation graph is loaded.</div></div></div>;
+
+  if (error) return <div role="alert" className="grid min-h-[420px] place-items-center rounded-xl border border-red-500/20 bg-red-500/5 p-8 text-center"><div><Network className="mx-auto mb-3 text-red-400" size={22}/><div className="text-sm font-medium text-red-200">Graph could not be loaded</div><div className="mt-1 max-w-md text-xs leading-5 text-zinc-500">{error}</div><button onClick={loadGraph} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><RefreshCw size={13}/> Retry graph</button></div></div>;
+
   return (
     <div className="grid h-[650px] min-h-0 lg:grid-cols-[1fr_340px]">
       <div className="relative min-h-0">
-        {error && <div role="alert" className="absolute left-4 right-4 top-4 z-10 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-300">{error}</div>}
-        <ReactFlow nodes={nodes} edges={edges} fitView onNodeClick={selectNode} onPaneClick={() => setSelectedId('')}>
-          <Background gap={24} /><MiniMap /><Controls />
-        </ReactFlow>
+        <ReactFlow nodes={nodes} edges={edges} fitView onNodeClick={selectNode} onPaneClick={() => setSelectedId('')}><Background gap={24} /><MiniMap /><Controls /></ReactFlow>
       </div>
       <aside className="overflow-y-auto border-t border-white/8 bg-[#0c0c0c] p-5 lg:border-l lg:border-t-0">
         <div className="flex items-center gap-2"><Network size={16} className="text-red-400" /><div><div className="font-medium">Graph investigation</div><div className="text-xs text-zinc-500">Select, focus, filter, and inspect evidence-backed relationships.</div></div></div>
@@ -111,17 +94,9 @@ export function Graph({ id, findings = [], onEvidence, onPivot }: { id: number; 
         </div>
         {selectedNode ? (
           <div className="mt-5 rounded-xl border border-white/10 bg-white/[.02] p-4">
-            <div className="text-[10px] uppercase tracking-[.18em] text-red-400">Selected entity</div>
-            <div className="mt-2 break-words font-semibold">{selectedNode.label}</div>
-            <div className="mt-1 text-xs text-zinc-500">{selectedNode.type}</div>
-            {typeof selectedEvidenceState === 'string' && <div className="mt-3 text-xs text-zinc-400">Evidence state: {String(selectedEvidenceState)}</div>}
-            {typeof selectedNode.metadata?.confidence === 'number' && <div className="mt-1 text-xs text-zinc-400">Confidence: {Math.round(selectedNode.metadata.confidence * 100)}%</div>}
-            <div className="mt-4 grid gap-2">
-              <button onClick={() => setFocusId(selectedNode.id)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><Crosshair size={13} /> Focus neighborhood</button>
-              {selectedFindings.length ? <div className="space-y-2 rounded-lg border border-white/8 bg-white/[.02] p-3"><div className="text-[10px] uppercase tracking-[.16em] text-zinc-500">Persisted evidence</div>{selectedFindings.map((finding) => <button key={finding.id} onClick={() => onEvidence?.(finding.id)} disabled={!onEvidence} className="w-full rounded-lg border border-white/10 px-3 py-2 text-left text-xs hover:bg-white/[.05] disabled:cursor-default"><div className="flex items-center justify-between gap-2"><span className="font-medium text-zinc-200">#{finding.id} · {finding.finding_type}</span><span className="text-zinc-500">{Math.round(finding.confidence * 100)}%</span></div><div className="mt-1 truncate text-zinc-500">{finding.source}</div></button>)}</div> : onEvidence ? <div className="rounded-lg border border-dashed border-white/10 p-3 text-[11px] leading-4 text-zinc-600">This derived graph entity has no exact value-linked persisted finding in the current investigation.</div> : null}
-              {selectedNode.type === 'EMAIL' && onPivot && <button onClick={pivotEmail} disabled={pivoting || !emailPattern.test(selectedNode.label.trim())} className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-40">{pivoting ? 'Starting pivot…' : 'Pivot email'}</button>}
-              {typeof selectedSourceUrl === 'string' && <a href={selectedSourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><ExternalLink size={13} /> Open provenance source</a>}
-            </div>
+            <div className="text-[10px] uppercase tracking-[.18em] text-red-400">Selected entity</div><div className="mt-2 break-words font-semibold">{selectedNode.label}</div><div className="mt-1 text-xs text-zinc-500">{selectedNode.type}</div>
+            {typeof selectedEvidenceState === 'string' && <div className="mt-3 text-xs text-zinc-400">Evidence state: {String(selectedEvidenceState)}</div>}{typeof selectedNode.metadata?.confidence === 'number' && <div className="mt-1 text-xs text-zinc-400">Confidence: {Math.round(selectedNode.metadata.confidence * 100)}%</div>}
+            <div className="mt-4 grid gap-2"><button onClick={() => setFocusId(selectedNode.id)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><Crosshair size={13} /> Focus neighborhood</button>{selectedFindings.length ? <div className="space-y-2 rounded-lg border border-white/8 bg-white/[.02] p-3"><div className="text-[10px] uppercase tracking-[.16em] text-zinc-500">Persisted evidence</div>{selectedFindings.map((finding) => <button key={finding.id} onClick={() => onEvidence?.(finding.id)} disabled={!onEvidence} className="w-full rounded-lg border border-white/10 px-3 py-2 text-left text-xs hover:bg-white/[.05] disabled:cursor-default"><div className="flex items-center justify-between gap-2"><span className="font-medium text-zinc-200">#{finding.id} · {finding.finding_type}</span><span className="text-zinc-500">{Math.round(finding.confidence * 100)}%</span></div><div className="mt-1 truncate text-zinc-500">{finding.source}</div></button>)}</div> : onEvidence ? <div className="rounded-lg border border-dashed border-white/10 p-3 text-[11px] leading-4 text-zinc-600">This derived graph entity has no exact value-linked persisted finding in the current investigation.</div> : null}{selectedNode.type === 'EMAIL' && onPivot && <button onClick={pivotEmail} disabled={pivoting || !emailPattern.test(selectedNode.label.trim())} className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-40">{pivoting ? 'Starting pivot…' : 'Pivot email'}</button>}{typeof selectedSourceUrl === 'string' && <a href={selectedSourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><ExternalLink size={13} /> Open provenance source</a>}</div>
           </div>
         ) : <div className="mt-5 rounded-xl border border-dashed border-white/10 p-5 text-center text-xs text-zinc-600">Select an entity to inspect its evidence and pivots.</div>}
         {focusedNode && <div className="mt-4 rounded-xl border border-white/10 bg-white/[.02] p-4 text-xs"><div className="font-medium">Focused neighborhood</div><div className="mt-1 break-words text-zinc-400">{focusedNode.label}</div><div className="mt-3 text-zinc-500">{neighborhoodIds.size} nearby entities</div>{selectedId && selectedId !== focusId && <div className="mt-2 break-words text-zinc-500">Path: {path.length ? path.join(' → ') : 'No connected path in current filters.'}</div>}</div>}
