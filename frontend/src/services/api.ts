@@ -10,15 +10,24 @@ export type GraphNode = {
   id: string;
   type: string;
   label: string;
+  metadata?: Record<string, unknown> | null;
 };
 
 export type GraphEdge = {
   source: string;
   target: string;
   relation: string;
+  confidence: number;
 };
 
 export type GraphData = {
+  semantics?: string;
+  provenance?: {
+    type?: string;
+    execution_id?: string | null;
+    execution_attempt_id?: string | null;
+    attempt_status?: string | null;
+  };
   nodes: GraphNode[];
   edges: GraphEdge[];
 };
