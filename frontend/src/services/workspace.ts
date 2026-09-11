@@ -4,7 +4,7 @@ export type InvestigationSummary={id:number;target:string;status:string;risk_sco
 export type SortKey='created_desc'|'created_asc'|'risk_desc'|'risk_asc'|'target_asc';
 
 export function filterInvestigations(items:InvestigationSummary[],query:string,status:string,risk:string){
- const q=query.trim().toLowerCase();
+ const q=query.trim().toLowerCase().replace(/^#/,'');
  return items.filter(item=>{
   const matchesQuery=!q||item.target.toLowerCase().includes(q)||String(item.id).includes(q);
   const matchesStatus=status==='all'||item.status===status;
