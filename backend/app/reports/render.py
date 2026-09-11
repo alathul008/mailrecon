@@ -6,6 +6,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 
+from app.osint.correlation import correlate_email_findings
+
 
 def _pdf_text(value) -> str:
     return escape("" if value is None else str(value))
@@ -19,6 +21,18 @@ def pdf_report(inv, findings, factors, provenance=None):
     provenance_rows=[["Field","Value"]]+[[_pdf_text(key),_pdf_text(value)] for key,value in provenance.items()]
     provenance_table=Table(provenance_rows,colWidths=[180,300],repeatRows=1); provenance_table.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.25,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"TOP")])); story.append(provenance_table); story.append(Spacer(1,10))
     story.append(Paragraph("Executive summary",styles["Heading2"])); story.append(Paragraph("OSINT findings are probabilistic and should be independently verified. This report contains only evidence collected by configured public/legitimate providers and local analysis.",styles["BodyText"])); story.append(Spacer(1,10))
+    story.append(Paragraph("Correlation assessment",styles["Heading2"]))
+    projection=[{"id":getattr(f,"id",None),"source":getattr(f,"source",None),"finding_type":getattr(f,"finding_type",None),"value":getattr(f,"value",None),"confidence":getattr(f,"confidence",0),"evidence_state":getattr(f,"evidence_state",None),"notes":getattr(f,"notes",None),"raw_reference":getattr(f,"raw_reference",None)} for f in findings]
+    correlation=correlate_email_findings(projection)
+    story.append(Paragraph("Derived relationships are hypotheses; correlated relationships explain linked observations and do not confirm human identity.",styles["BodyText"]))
+    corr_rows=[["Relationship","State","Confidence","Support"]]
+    for rel in correlation.get("relationships",[]):
+        corr_rows.append([_pdf_text(f"{rel['source']} → {rel['target']} ({rel['relationship']})")[:90],_pdf_text(rel["evidence_state"]),_pdf_text(f"{rel['confidence']:.0%}"),_pdf_text(", ".join(map(str,rel["supporting_finding_ids"])) or "none")])
+    if len(corr_rows)==1:corr_rows.append(["No cross-signal relationships observed","—","—","—"])
+    corr_table=Table(corr_rows,colWidths=[300,75,65,60],repeatRows=1); corr_table.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.25,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey),("VALIGN",(0,0),(-1,-1),"TOP")])); story.append(corr_table)
+    if correlation.get("conflicts"):
+        story.append(Spacer(1,6));story.append(Paragraph("Provider conflicts are preserved rather than arbitrarily resolved.",styles["BodyText"]))
+    story.append(Spacer(1,10))
     story.append(Paragraph("Risk factors",styles["Heading2"])); data=[["Delta","Reason"]]+[[_pdf_text(f.get("delta")),_pdf_text(f.get("reason"))] for f in factors]; t=Table(data,colWidths=[60,420]); t.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.3,colors.grey),("BACKGROUND",(0,0),(-1,0),colors.lightgrey)])); story.append(t); story.append(Spacer(1,10))
     story.append(Paragraph("Findings",styles["Heading2"])); rows=[["Source","Type","Value","Confidence","Severity","Evidence","Attempt"]]
     current_attempt=provenance.get("execution_attempt_id")
