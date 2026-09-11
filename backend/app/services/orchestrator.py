@@ -122,20 +122,15 @@ async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:in
     monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks))
     gathered=None
     try:
-        done,pending=await asyncio.wait([*tasks,monitor],return_when=asyncio.FIRST_COMPLETED)
-        if monitor in done:
-            exc=monitor.exception()
-            if exc is not None:
-                await _cancel_provider_tasks(tasks)
-                raise exc
+        while True:
+            done,_=await asyncio.wait([*tasks,monitor],return_when=asyncio.FIRST_COMPLETED)
+            if monitor in done:
+                exc=monitor.exception()
+                if exc is not None:raise exc
+                break
             if all(task.done() for task in tasks):
-                gathered=_provider_tasks_outcome(tasks)
-            else:
-                await _cancel_provider_tasks(tasks)
-                raise ProviderOwnershipLost("Provider work abandoned after execution ownership was lost")
-        else:
-            gathered=_provider_tasks_outcome(tasks)
-            await monitor
+                break
+        gathered=_provider_tasks_outcome(tasks)
         with SessionLocal() as db:_require_ownership(db,inv_id,token)
         return gathered
     finally:
