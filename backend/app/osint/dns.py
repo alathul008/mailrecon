@@ -19,7 +19,7 @@ async def _resolve(resolver, name, rdtype):
 
 def record_presence(values, status):
     """Return True/False for an answered DNS query, None when unavailable/error."""
-    if status in {"unavailable", "error"}:
+    if status in {"unavailable", "error"} or status is False:
         return None
     return bool(values)
 
@@ -32,6 +32,12 @@ async def resolve(domain: str) -> dict:
     out = {}
     statuses = {}
     for kind, (values, status) in zip(record_types, results):
+        # Keep compatibility with existing tests/integrations that monkeypatch the
+        # resolver helper with its former boolean status contract.
+        if status is True:
+            status = "ok"
+        elif status is False:
+            status = "unavailable"
         out[kind] = values
         statuses[kind] = status
 
@@ -40,6 +46,10 @@ async def resolve(domain: str) -> dict:
     out["SPF_status"] = statuses["TXT"]
 
     dmarc, dmarc_status = await _resolve(resolver, f"_dmarc.{domain}", "TXT")
+    if dmarc_status is True:
+        dmarc_status = "ok"
+    elif dmarc_status is False:
+        dmarc_status = "unavailable"
     out["DMARC"] = [x for x in dmarc if x.lower().startswith("v=dmarc1")]
     out["DMARC_status"] = dmarc_status
 
@@ -52,6 +62,10 @@ async def resolve(domain: str) -> dict:
     dkim = []
     dkim_statuses = []
     for selector, (values, status) in zip(dkim_selectors, dkim_results):
+        if status is True:
+            status = "ok"
+        elif status is False:
+            status = "unavailable"
         if values:
             dkim.extend([f"{selector}: {value}" for value in values if value.lower().startswith("v=dkim1")])
         dkim_statuses.append(status)
