@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, MiniMap, type Edge, type Node, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowRight, Crosshair, ExternalLink, Filter, Network, RotateCcw, Search } from 'lucide-react';
-import { createInvestigation, getGraph, type GraphData, type GraphNode } from '../services/api';
+import { ArrowRight, Crosshair, ExternalLink, Filter, Network, RotateCcw } from 'lucide-react';
+import { createInvestigation, getGraph, type GraphData } from '../services/api';
 import { graphEvidenceCandidates, graphNodeTypes, graphRelations, neighborhood, shortestPath, type GraphFilters } from '../services/graph';
 import type { Finding } from '../types';
 
