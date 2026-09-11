@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ReactFlow, Background, Controls, MiniMap, type Edge, type Node, type NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { ArrowRight, Crosshair, ExternalLink, Filter, Network, RotateCcw, Search } from 'lucide-react';
-import { createInvestigation, getGraph, type GraphData, type GraphNode } from '../services/api';
-import { graphNodeTypes, graphRelations, neighborhood, shortestPath, type GraphFilters } from '../services/graph';
+import { ArrowRight, Crosshair, ExternalLink, Filter, Network, RotateCcw } from 'lucide-react';
+import { createInvestigation, getGraph, type GraphData } from '../services/api';
+import { graphEvidenceCandidates, graphNodeTypes, graphRelations, neighborhood, shortestPath, type GraphFilters } from '../services/graph';
+import type { Finding } from '../types';
 
 const initialFilters: GraphFilters = { nodeType: 'all', relation: 'all', minConfidence: 0 };
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function Graph({ id, onEvidence, onPivot }: { id: number; onEvidence?: (node: GraphNode) => void; onPivot?: (investigationId: number) => void }) {
+type EvidenceCallback = (findingId: number) => void;
+
+export function Graph({ id, findings = [], onEvidence, onPivot }: { id: number; findings?: Finding[]; onEvidence?: EvidenceCallback; onPivot?: (investigationId: number) => void }) {
   const [graph, setGraph] = useState<GraphData>({ nodes: [], edges: [] });
   const [selectedId, setSelectedId] = useState('');
   const [focusId, setFocusId] = useState('');
@@ -40,6 +43,8 @@ export function Graph({ id, onEvidence, onPivot }: { id: number; onEvidence?: (n
   const focusedNode = graph.nodes.find((node) => node.id === focusId) || null;
   const types = useMemo(() => graphNodeTypes(graph), [graph]);
   const relations = useMemo(() => graphRelations(graph), [graph]);
+  const selectedEvidenceIds = useMemo(() => selectedNode ? (graphEvidenceCandidates([selectedNode], findings)[0]?.findingIds || []) : [], [selectedNode, findings]);
+  const selectedFindings = useMemo(() => selectedEvidenceIds.map((findingId) => findings.find((finding) => finding.id === findingId)).filter((finding): finding is Finding => Boolean(finding)), [selectedEvidenceIds, findings]);
 
   const nodes: Node[] = useMemo(() => visible.nodes.map((node, index) => {
     const selected = node.id === selectedId;
@@ -113,7 +118,7 @@ export function Graph({ id, onEvidence, onPivot }: { id: number; onEvidence?: (n
             {typeof selectedNode.metadata?.confidence === 'number' && <div className="mt-1 text-xs text-zinc-400">Confidence: {Math.round(selectedNode.metadata.confidence * 100)}%</div>}
             <div className="mt-4 grid gap-2">
               <button onClick={() => setFocusId(selectedNode.id)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><Crosshair size={13} /> Focus neighborhood</button>
-              {onEvidence && <button onClick={() => onEvidence(selectedNode)} className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><Search size={13} /> Open related evidence</button>}
+              {selectedFindings.length ? <div className="space-y-2 rounded-lg border border-white/8 bg-white/[.02] p-3"><div className="text-[10px] uppercase tracking-[.16em] text-zinc-500">Persisted evidence</div>{selectedFindings.map((finding) => <button key={finding.id} onClick={() => onEvidence?.(finding.id)} disabled={!onEvidence} className="w-full rounded-lg border border-white/10 px-3 py-2 text-left text-xs hover:bg-white/[.05] disabled:cursor-default"><div className="flex items-center justify-between gap-2"><span className="font-medium text-zinc-200">#{finding.id} · {finding.finding_type}</span><span className="text-zinc-500">{Math.round(finding.confidence * 100)}%</span></div><div className="mt-1 truncate text-zinc-500">{finding.source}</div></button>)}</div> : onEvidence ? <div className="rounded-lg border border-dashed border-white/10 p-3 text-[11px] leading-4 text-zinc-600">This derived graph entity has no exact value-linked persisted finding in the current investigation.</div> : null}
               {selectedNode.type === 'EMAIL' && onPivot && <button onClick={pivotEmail} disabled={pivoting || !emailPattern.test(selectedNode.label.trim())} className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-40">{pivoting ? 'Starting pivot…' : 'Pivot email'}</button>}
               {typeof selectedSourceUrl === 'string' && <a href={selectedSourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs hover:bg-white/[.05]"><ExternalLink size={13} /> Open provenance source</a>}
             </div>
