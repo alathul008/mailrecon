@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react';
+import {useEffect,useState} from 'react';
 import {ArrowLeft,Download,LoaderCircle,Network,RefreshCw,Trash2} from 'lucide-react';
 import {deleteInvestigation,downloadReport,getInvestigation,getTimeline,createInvestigation} from '../services/api';
 import type {Finding,Investigation as InvestigationType,TimelineEvent} from '../types';
