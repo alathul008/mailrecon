@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Activity, FolderSearch, LayoutDashboard, Menu, Search, ShieldCheck, X } from 'lucide-react';
 
 const items = [
@@ -7,7 +8,7 @@ const items = [
 ] as const;
 
 export function Layout({ children, active, onNav }: { children: React.ReactNode; active: string; onNav: (x: string) => void }) {
-  const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = (label: string) => {
     onNav(label);
     setMobileOpen(false);
