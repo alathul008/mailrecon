@@ -1,0 +1,70 @@
+import {beforeEach,describe,expect,it,vi} from 'vitest';
+import type {Finding} from '../src/types';
+
+vi.mock('react',async()=>{
+ const actual=await vi.importActual<typeof import('react')>('react');
+ let state:any[]=[];let cursor=0;const effects=new Set<number>();let forcedTab:string|null=null;
+ return {...actual,
+  useState:<T>(initial:T)=>{const i=cursor++;if(!(i in state))state[i]=initial;const value=(initial==='Overview'&&forcedTab)?forcedTab:state[i];return [value,(next:T|((v:T)=>T))=>{state[i]=typeof next==='function'?(next as (v:T)=>T)(state[i]):next}] as const},
+  useMemo:<T>(fn:()=>T)=>{cursor++;return fn()},useCallback:<T>(fn:T)=>{cursor++;return fn},
+  useEffect:(fn:()=>void|(()=>void))=>{const i=cursor++;if(!effects.has(i)){effects.add(i);void fn()}},
+  __reset:()=>{state=[];cursor=0;effects.clear();forcedTab=null},__rewind:()=>{cursor=0},__forceTab:(tab:string)=>{forcedTab=tab},
+ };
+});
+
+vi.mock('../src/services/api',()=>({listInvestigations:vi.fn(),deleteInvestigation:vi.fn(),getInvestigation:vi.fn(),getTimeline:vi.fn(),createInvestigation:vi.fn(),downloadReport:vi.fn()}));
+
+const items=[
+ {id:1,target:'alpha@example.com',status:'completed',risk_score:80,risk_level:'high',created_at:'2026-01-02T00:00:00Z'},
+ {id:2,target:'beta@example.com',status:'failed',risk_score:20,risk_level:'low',created_at:'2026-01-03T00:00:00Z'},
+];
+const emailFinding:Finding={id:1,source:'github',finding_type:'email_match',value:'alpha@example.com',confidence:.9,severity:'high',collected_at:'2026-01-01T00:00:00Z',evidence_state:'observed',current_attempt:true,execution_attempt_id:'current',source_url:'https://example.com/evidence',notes:'Observed on public source.'};
+const historicalFinding:Finding={id:2,source:'github',finding_type:'email_match',value:'old@example.com',confidence:.6,severity:'medium',collected_at:'2026-01-01T00:00:00Z',evidence_state:'observed',current_attempt:false,execution_attempt_id:'old'};
+const dnsFinding:Finding={id:3,source:'dns',finding_type:'mx',value:'mail.example.com',confidence:.8,severity:'info',collected_at:'2026-01-01T00:00:00Z',evidence_state:'observed',current_attempt:true,execution_attempt_id:'current'};
+const investigation:any={id:1,target:'alpha@example.com',status:'completed',risk_score:80,risk_level:'high',created_at:'2026-01-02T00:00:00Z',username:'alpha',domain:'example.com',findings:[emailFinding,historicalFinding,dnsFinding,{id:4,source:'github',finding_type:'provider_status',value:'ok',confidence:1,severity:'info',collected_at:'2026-01-01T00:00:00Z',evidence_state:'observed',current_attempt:true,notes:'Provider completed.'},{id:5,source:'risk',finding_type:'risk_dimension',value:'exposure=70',confidence:1,severity:'info',collected_at:'2026-01-01T00:00:00Z',evidence_state:'observed',current_attempt:true}],modules:[{module:'github',status:'completed',message:'Done'}]};
+
+function text(node:any):string{if(node==null||typeof node==='boolean')return '';if(typeof node==='string'||typeof node==='number')return String(node);if(Array.isArray(node))return node.map(text).join('');return text(node.props?.children)}
+function elements(node:any):any[]{if(node==null||typeof node!=='object')return [];if(Array.isArray(node))return node.flatMap(elements);return [node,...elements(node.props?.children)]}
+function findButton(tree:any,label:string){return elements(tree).find(e=>e.type==='button'&&text(e)===label)}
+function findByLabel(tree:any,label:string){return elements(tree).find(e=>e.props?.['aria-label']===label)}
+
+function installWindow(){const listeners=new Map<string,Set<() => void>>();(globalThis as any).window={confirm:vi.fn(()=>true),setInterval:vi.fn(()=>1),clearInterval:vi.fn(),addEventListener:(n:string,f:()=>void)=>{if(!listeners.has(n))listeners.set(n,new Set());listeners.get(n)!.add(f)},removeEventListener:(n:string,f:()=>void)=>listeners.get(n)?.delete(f),dispatchEvent:(e:Event)=>{listeners.get(e.type)?.forEach(f=>f());return true}}}
+
+beforeEach(async()=>{vi.clearAllMocks();installWindow();const r=await import('react') as any;r.__reset()});
+
+describe('Phase 20 workspace UI',()=>{
+ it('covers loading, list rendering, search/filter/sort, empty/error, open, and deletion',async()=>{
+  const api=await import('../src/services/api');vi.mocked(api.listInvestigations).mockResolvedValue(items);vi.mocked(api.deleteInvestigation).mockResolvedValue({id:2,status:'deleted'});
+  const {Investigations}=await import('../src/pages/Investigations');const r=await import('react') as any;r.__rewind();let tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});expect(text(tree)).toContain('Loading investigations');await Promise.resolve();await Promise.resolve();r.__rewind();tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});expect(text(tree)).toContain('alpha@example.com');
+  const search=findByLabel(tree,'Search investigations');search.props.onChange({target:{value:'beta'}});r.__rewind();tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});expect(text(tree)).toContain('beta@example.com');expect(text(tree)).not.toContain('alpha@example.com');
+  const status=findByLabel(tree,'Filter status');status.props.onChange({target:{value:'failed'}});r.__rewind();tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});expect(text(tree)).toContain('beta@example.com');
+  const open=vi.fn();r.__reset();r.__rewind();Investigations({onOpen:open,onNew:vi.fn()});await Promise.resolve();await Promise.resolve();r.__rewind();tree=Investigations({onOpen:open,onNew:vi.fn()});findButton(tree,'Open').props.onClick();expect(open).toHaveBeenCalledWith(1);
+  const betaRow=elements(tree).find(e=>e.type==='tr'&&text(e).includes('beta@example.com'));expect(betaRow).toBeTruthy();const del=elements(betaRow).find(e=>e.type==='button'&&text(e).includes('Delete'));await del.props.onClick();expect(api.deleteInvestigation).toHaveBeenCalledWith(2);
+  vi.mocked(api.listInvestigations).mockResolvedValue([]);r.__reset();r.__rewind();Investigations({onOpen:vi.fn(),onNew:vi.fn()});await Promise.resolve();await Promise.resolve();r.__rewind();expect(text(Investigations({onOpen:vi.fn(),onNew:vi.fn()}))).toContain('No investigations yet');
+  vi.mocked(api.listInvestigations).mockRejectedValue(new Error('load failed'));r.__reset();r.__rewind();Investigations({onOpen:vi.fn(),onNew:vi.fn()});await Promise.resolve();await Promise.resolve();r.__rewind();expect(text(Investigations({onOpen:vi.fn(),onNew:vi.fn()}))).toContain('load failed');
+ });
+});
+
+describe('Phase 20 detail and evidence UI',()=>{
+ it('renders detail sections, provenance, and current/historical evidence',async()=>{
+  const api=await import('../src/services/api');vi.mocked(api.getInvestigation).mockResolvedValue(investigation);vi.mocked(api.getTimeline).mockResolvedValue([] as any);const {Investigation}=await import('../src/pages/Investigation');const r=await import('react') as any;r.__reset();r.__rewind();let tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});expect(text(tree)).toContain('Loading investigation #1');await Promise.resolve();await Promise.resolve();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});for(const tab of ['Overview','Evidence','Providers','Timeline','Graph','Reports'])expect(text(tree)).toContain(tab);
+  r.__forceTab('Evidence');r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});expect(text(tree)).toContain('Evidence explorer');expect(text(tree)).toContain('alpha@example.com');expect(text(tree)).toContain('old@example.com');expect(text(tree)).toContain('Current execution');expect(text(tree)).toContain('Historical execution');
+  const row=elements(tree).find(e=>e.type==='tr'&&text(e).includes('alpha@example.com'));row.props.onClick();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});expect(text(tree)).toContain('Finding detail');expect(text(tree)).toContain('Observed on public source.');expect(text(tree)).toContain('current');
+ });
+
+ it('renders every execution and provider state and separates provider failures from intelligence',async()=>{
+  const {ExecutionStatus}=await import('../src/components/ExecutionStatus');for(const s of ['queued','running','completed','failed','abandoned','recovered'])expect(text(ExecutionStatus({status:s}))).toContain(s);
+  const {ProviderStatusGrid}=await import('../src/components/ProviderStatusGrid');const fs=['ok','unconfigured','rate_limited','unavailable','error','disabled'].map((value,i)=>({...dnsFinding,id:20+i,source:`provider-${value}`,finding_type:'provider_status',value}));const tree=ProviderStatusGrid({findings:fs});for(const s of ['ok','unconfigured','rate_limited','unavailable','error','disabled'])expect(text(tree)).toContain(s);expect(text(tree)).toContain('provider failure is not a negative result');
+ });
+});
+
+describe('Phase 20 analyst actions',()=>{
+ it('pivots only email findings, calls the existing API, navigates to the new investigation, and states no identity merge',async()=>{
+  const api=await import('../src/services/api');vi.mocked(api.getInvestigation).mockResolvedValue(investigation);vi.mocked(api.getTimeline).mockResolvedValue([] as any);vi.mocked(api.createInvestigation).mockResolvedValue({id:9,status:'queued'});const {Investigation}=await import('../src/pages/Investigation');const r=await import('react') as any;const onOpen=vi.fn();r.__reset();r.__forceTab('Evidence');r.__rewind();let tree=Investigation({id:1,onBack:vi.fn(),onOpen});await Promise.resolve();await Promise.resolve();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen});const row=elements(tree).find(e=>e.type==='tr'&&text(e).includes('alpha@example.com'));row.props.onClick();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen});let pivot=findButton(tree,'Pivot to separate investigation');expect(pivot.props.disabled).toBe(false);await pivot.props.onClick();expect(api.createInvestigation).toHaveBeenCalledWith('alpha@example.com',false,true);expect(onOpen).toHaveBeenCalledWith(9);expect(text(tree)).toContain('never confirms identity or merges investigations');
+  const dns=elements(tree).find(e=>e.type==='tr'&&text(e).includes('mail.example.com'));dns.props.onClick();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen});pivot=findButton(tree,'Pivot to separate investigation');expect(pivot.props.disabled).toBe(true);
+ });
+
+ it('renders reports and invokes the existing report API',async()=>{const api=await import('../src/services/api');vi.mocked(api.getInvestigation).mockResolvedValue(investigation);vi.mocked(api.getTimeline).mockResolvedValue([] as any);vi.mocked(api.downloadReport).mockResolvedValue(undefined);const {Investigation}=await import('../src/pages/Investigation');const r=await import('react') as any;r.__reset();r.__forceTab('Reports');r.__rewind();let tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});await Promise.resolve();await Promise.resolve();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});for(const f of ['JSON','CSV','HTML','PDF'])expect(text(tree)).toContain(`Export ${f}`);await findButton(tree,'Export JSON').props.onClick();expect(api.downloadReport).toHaveBeenCalledWith(1,'json')});
+
+ it('handles auth-required and deletion errors without bypassing workspace behavior',async()=>{const api=await import('../src/services/api');vi.mocked(api.getInvestigation).mockResolvedValue(investigation);vi.mocked(api.getTimeline).mockResolvedValue([] as any);vi.mocked(api.deleteInvestigation).mockRejectedValue(new Error('delete unauthorized'));const {Investigation}=await import('../src/pages/Investigation');const r=await import('react') as any;r.__reset();r.__rewind();Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});await Promise.resolve();await Promise.resolve();r.__rewind();let tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});await findButton(tree,'Delete').props.onClick();await Promise.resolve();r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});expect(text(tree)).toContain('delete unauthorized');window.dispatchEvent(new Event('mailrecon:auth-required'));r.__rewind();tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()});expect(text(tree)).toContain('Authentication required. Enter your MailRecon API key before continuing.')});
+});
