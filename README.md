@@ -27,7 +27,7 @@ MailRecon is a local-first defensive investigation workspace for analyzing an em
 
 MailRecon is intended for **authorized defensive research and public-data investigations**. It does not retrieve passwords, bypass authentication, defeat CAPTCHAs, or access private accounts.
 
-Protected API endpoints require `MAILRECON_API_KEY`. The `/api/health` endpoint remains public for health checks. The browser UI accepts the key and stores it locally so the same build works with the local Docker deployment and a separately served development frontend. This is a single-user/local access-control mechanism, not multi-user authentication.
+Protected API endpoints require `MAILRECON_API_KEY`. The `/api/health` endpoint remains public for health checks. The browser UI accepts the key and stores it in `sessionStorage` for the current browser session so the same build works with the local Docker deployment and a separately served development frontend. This is a single-user/local access-control mechanism, not multi-user authentication.
 
 The application uses HTTPS-only outbound validation for generic external URLs, blocks non-public destinations, rejects URL userinfo, limits request bodies, and exposes explicit provider failure states. See `docs/security.md` and `SECURITY.md`.
 
@@ -80,14 +80,7 @@ Copy `.env.example` to `.env` and configure only the services you want. HIBP and
 
 ## Verification status
 
-The repository CI workflow verifies:
-
-- backend pytest suite, including API authentication regression coverage;
-- frontend unit tests;
-- TypeScript compilation;
-- production frontend build.
-
-The Phase 1 authentication branch has passed both backend and frontend CI jobs. Keep the verification status tied to CI rather than claiming local-only checks that were not run.
+The repository CI workflow is the source of truth for verification. It runs the backend pytest suite and dependency audit, frontend tests/lint/type-check/build, secret scanning, container scanning, workflow-security analysis, and CodeQL/SAST. Release claims should be tied to a completed green CI run for the exact commit being released rather than to historical phase-specific verification statements.
 
 ## Responsible use
 
