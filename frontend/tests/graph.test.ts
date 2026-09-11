@@ -58,4 +58,14 @@ describe('graph intelligence helpers', () => {
       { nodeId: 'profile:a', findingIds: [11] },
     ]);
   });
+
+  it('retains every persisted evidence candidate when graph labels are shared', () => {
+    expect(graphEvidenceCandidates(
+      [{ id: 'profile:a', type: 'PROFILE', label: 'shared-profile' }],
+      [
+        { id: 21, value: 'shared-profile' },
+        { id: 22, value: 'shared-profile' },
+      ],
+    )).toEqual([{ nodeId: 'profile:a', findingIds: [21, 22] }]);
+  });
 });
