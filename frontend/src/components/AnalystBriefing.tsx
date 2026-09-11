@@ -22,14 +22,16 @@ function confidenceLabel(value: number) {
   return `${Math.round(value * 100)}% confidence`;
 }
 
-export function AnalystBriefing({ investigation, findings, graph }: { investigation: Investigation; findings: Finding[]; graph?: GraphData }) {
+export function AnalystBriefing({ investigation, findings, providers, graph }: { investigation: Investigation; findings: Finding[]; providers: Finding[]; graph?: GraphData }) {
   const notable = selectNotableFindings(findings);
   const observed = notable.filter((finding) => ['observed', 'confirmed'].includes(stateLabel(finding).toLowerCase()));
   const derived = notable.filter((finding) => !['observed', 'confirmed'].includes(stateLabel(finding).toLowerCase()));
   const sourceCount = new Set(findings.map((finding) => finding.source).filter(Boolean)).size;
   const currentAttemptCount = findings.filter((finding) => finding.current_attempt).length;
   const failedModules = investigation.modules.filter((module) => module.status === 'failed').length;
+  const providerFailures = providers.filter((finding) => ['error', 'unavailable', 'rate_limited'].includes(finding.value)).length;
   const relationships = (graph?.edges || []).slice().sort((a, b) => b.confidence - a.confidence || `${a.source}|${a.target}|${a.relation}`.localeCompare(`${b.source}|${b.target}|${b.relation}`)).slice(0, 3);
+  const nodeLabel = new Map((graph?.nodes || []).map((node) => [node.id, node.label]));
 
   return (
     <section aria-label="Analyst briefing" className="glass rounded-2xl p-5">
@@ -56,7 +58,7 @@ export function AnalystBriefing({ investigation, findings, graph }: { investigat
           <div className="mt-3 space-y-2 text-xs">
             <div className="flex justify-between rounded-lg border border-white/7 p-3"><span>Graph entities</span><span className="font-medium">{graph?.nodes.length ?? '—'}</span></div>
             <div className="flex justify-between rounded-lg border border-white/7 p-3"><span>Graph relationships</span><span className="font-medium">{graph?.edges.length ?? '—'}</span></div>
-            {relationships.map((edge) => <div key={`${edge.source}|${edge.target}|${edge.relation}`} className="rounded-lg border border-white/7 p-3"><div className="break-words text-zinc-300">{edge.source} → {edge.target}</div><div className="mt-1 text-[10px] text-zinc-600">{edge.relation} · {confidenceLabel(edge.confidence)} · derived relationship</div></div>)}
+            {relationships.map((edge) => <div key={`${edge.source}|${edge.target}|${edge.relation}`} className="rounded-lg border border-white/7 p-3"><div className="break-words text-zinc-300">{nodeLabel.get(edge.source) || edge.source} → {nodeLabel.get(edge.target) || edge.target}</div><div className="mt-1 text-[10px] text-zinc-600">{edge.relation} · {confidenceLabel(edge.confidence)} · derived relationship</div></div>)}
             {derived.length > 0 && <div className="rounded-lg border border-dashed border-white/8 p-3 text-zinc-500">{derived.length} notable finding{derived.length === 1 ? '' : 's'} require contextual review because their evidence state is not explicitly observed.</div>}
           </div>
         </div>
@@ -65,11 +67,12 @@ export function AnalystBriefing({ investigation, findings, graph }: { investigat
           <div className="flex items-center gap-2 text-xs font-medium"><CircleHelp size={14} className="text-zinc-400" />Provenance & execution</div>
           <div className="mt-3 grid gap-2 text-xs">
             <div className="rounded-lg border border-white/7 p-3"><div className="text-zinc-600">Evidence sources</div><div className="mt-1 font-medium">{sourceCount}</div></div>
+            <div className="rounded-lg border border-white/7 p-3"><div className="text-zinc-600">Providers</div><div className="mt-1 font-medium">{providers.length} · {providerFailures ? `${providerFailures} non-success` : 'no failures recorded'}</div></div>
             <div className="rounded-lg border border-white/7 p-3"><div className="text-zinc-600">Findings from current attempt</div><div className="mt-1 font-medium">{currentAttemptCount}</div></div>
             <div className="rounded-lg border border-white/7 p-3"><div className="text-zinc-600">Execution modules</div><div className="mt-1 font-medium">{investigation.modules.length} · {failedModules ? `${failedModules} failed` : 'no failures recorded'}</div></div>
             <div className="rounded-lg border border-white/7 p-3"><div className="text-zinc-600">Investigation status</div><div className="mt-1 font-medium capitalize">{investigation.status}</div></div>
           </div>
-          <div className="mt-3 rounded-lg border border-dashed border-white/8 p-3 text-[11px] leading-4 text-zinc-600">Use the Evidence, Providers, Timeline, and Graph tabs to inspect the exact source, evidence state, collection context, and producing execution attempt before drawing conclusions.</div>
+          <div className="mt-3 rounded-lg border border-dashed border-white/8 p-3 text-[11px] leading-4 text-zinc-600">Provider operational state is not intelligence. Use the Evidence, Providers, Timeline, and Graph tabs to inspect the exact source, evidence state, collection context, and producing execution attempt before drawing conclusions.</div>
         </div>
       </div>
 
