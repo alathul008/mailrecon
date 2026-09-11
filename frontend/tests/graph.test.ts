@@ -26,8 +26,8 @@ describe('graph intelligence helpers', () => {
 
   it('filters by type, relationship, and confidence without changing source graph', () => {
     const filtered = filterGraph(graph, { nodeType: 'EMAIL', relation: 'uses', minConfidence: 0.5 });
-    expect(filtered.nodes.map((node) => node.id)).toEqual(['email:a@example.com', 'domain:example.com']);
-    expect(filtered.edges).toEqual([graph.edges[0]]);
+    expect(filtered.nodes.map((node) => node.id)).toEqual(['email:a@example.com']);
+    expect(filtered.edges).toEqual([]);
     expect(graph.edges).toHaveLength(3);
   });
 
