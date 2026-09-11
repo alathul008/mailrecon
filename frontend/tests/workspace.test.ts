@@ -53,13 +53,14 @@ vi.mock('react', async()=>{
  const actual=await vi.importActual<typeof import('react')>('react');
  let state:any[]=[];
  let cursor=0;
+ const effects=new Set<number>();
  return {
   ...actual,
   useState:<T>(initial:T)=>{const index=cursor++;if(!(index in state))state[index]=initial;return [state[index],(next:T|((v:T)=>T))=>{state[index]=typeof next==='function'?(next as (v:T)=>T)(state[index]):next}] as const},
-  useMemo:<T>(factory:()=>T)=>factory(),
-  useCallback:<T>(callback:T)=>callback,
-  useEffect:(effect:()=>void|(()=>void))=>{void effect()},
-  __resetHooks:()=>{state=[];cursor=0},
+  useMemo:<T>(factory:()=>T)=>{cursor++;return factory()},
+  useCallback:<T>(callback:T)=>{cursor++;return callback},
+  useEffect:(effect:()=>void|(()=>void))=>{const index=cursor++;if(!effects.has(index)){effects.add(index);void effect()}},
+  __resetHooks:()=>{state=[];cursor=0;effects.clear()},
   __rewindHooks:()=>{cursor=0},
  };
 });
@@ -125,7 +126,7 @@ describe('Phase 20 investigation workspace UI',()=>{
   const {Investigations}=await import('../src/pages/Investigations');
   const react=await import('react') as typeof import('react') & {__rewindHooks:()=>void};
   react.__rewindHooks();
-  let onOpen=vi.fn(); let tree=Investigations({onOpen,onNew:vi.fn()});
+  const onOpen=vi.fn(); let tree=Investigations({onOpen,onNew:vi.fn()});
   expect(textOf(tree)).toContain('Loading investigations');
   await Promise.resolve(); await Promise.resolve(); react.__rewindHooks();
   tree=Investigations({onOpen,onNew:vi.fn()});
@@ -135,7 +136,7 @@ describe('Phase 20 investigation workspace UI',()=>{
   expect(textOf(tree)).toContain('beta@example.com'); expect(textOf(tree)).not.toContain('alpha@example.com');
   const status=allElements(tree).find(el=>el.type==='select'&&el.props?.['aria-label']==='Filter status');
   status.props.onChange({target:{value:'failed'}}); react.__rewindHooks(); tree=Investigations({onOpen,onNew:vi.fn()}); expect(textOf(tree)).toContain('beta@example.com');
-  const open=button(tree,'Open'); open.props.onClick(); expect(onOpen).toHaveBeenCalledWith(2);
+  button(tree,'Open').props.onClick(); expect(onOpen).toHaveBeenCalledWith(2);
   const sort=allElements(tree).find(el=>el.type==='select'&&el.props?.['aria-label']==='Sort investigations'); sort.props.onChange({target:{value:'risk_desc'}}); react.__rewindHooks(); tree=Investigations({onOpen,onNew:vi.fn()}); expect(textOf(tree)).toContain('beta@example.com');
   vi.mocked(api.listInvestigations).mockResolvedValue([]); react.__resetHooks(); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).toContain('Loading investigations'); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).toContain('No investigations yet');
   vi.mocked(api.listInvestigations).mockRejectedValue(new Error('load failed')); react.__resetHooks(); react.__rewindHooks(); Investigations({onOpen:vi.fn(),onNew:vi.fn()}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); expect(textOf(Investigations({onOpen:vi.fn(),onNew:vi.fn()}))).toContain('load failed');
