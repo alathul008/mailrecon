@@ -119,6 +119,7 @@ async def test_provider_completion_before_final_ownership_check_is_rejected(monk
 @pytest.mark.asyncio
 async def test_provider_completion_after_ownership_loss_is_rejected(monkeypatch):
     started = asyncio.Event()
+    ownership_checked = asyncio.Event()
     ownership_lost = asyncio.Event()
     release = asyncio.Event()
     owned = {"value": True}
@@ -136,6 +137,7 @@ async def test_provider_completion_after_ownership_loss_is_rejected(monkeypatch)
         nonlocal first_check
         if first_check:
             first_check = False
+            ownership_checked.set()
             return True
         ownership_lost.set()
         return owned["value"]
@@ -144,6 +146,7 @@ async def test_provider_completion_after_ownership_loss_is_rejected(monkeypatch)
 
     async def drive_race():
         await started.wait()
+        await ownership_checked.wait()
         owned["value"] = False
         release.set()
 
