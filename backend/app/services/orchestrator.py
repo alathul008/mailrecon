@@ -131,7 +131,10 @@ async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:in
             if all(task.done() for task in tasks):
                 break
         gathered=_provider_tasks_outcome(tasks)
-        with SessionLocal() as db:_require_ownership(db,inv_id,token)
+        try:
+            with SessionLocal() as db:_require_ownership(db,inv_id,token)
+        except RuntimeError as exc:
+            raise ProviderOwnershipLost(str(exc)) from exc
         return gathered
     finally:
         if not monitor.done():
