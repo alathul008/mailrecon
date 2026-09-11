@@ -75,29 +75,43 @@ async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_provider_completion_before_final_ownership_check_is_rejected(monkeypatch):
-    completed = asyncio.Event()
+    provider_done = asyncio.Event()
+    release_monitor = asyncio.Event()
     owned = {"value": True}
 
     class Provider:
         async def run(self, *args):
-            completed.set()
+            provider_done.set()
+            await release_monitor.wait()
             return ProviderResult("Gravatar", "ok", findings=[{"finding_type": "profile", "value": "stale"}])
 
     install_fake_providers(monkeypatch, Provider)
-    monkeypatch.setattr(orchestrator, "execution_is_owned", lambda db, inv_id, token: owned["value"])
+    ownership_checked = asyncio.Event()
 
-    async def controlled_sleep(_):
-        await completed.wait()
+    def ownership_probe(db, inv_id, token):
+        ownership_checked.set()
+        return owned["value"]
+
+    monkeypatch.setattr(orchestrator, "execution_is_owned", ownership_probe)
+
+    async def drive_race():
+        await provider_done.wait()
         owned["value"] = False
+        release_monitor.set()
 
-    monkeypatch.setattr(orchestrator.asyncio, "sleep", controlled_sleep)
-    with pytest.raises(orchestrator.ProviderOwnershipLost):
-        await orchestrator.run_providers("test@example.com", "example.com", ["test"], inv_id=1, token="token")
+    driver = asyncio.create_task(drive_race())
+    try:
+        with pytest.raises(orchestrator.ProviderOwnershipLost):
+            await orchestrator.run_providers("test@example.com", "example.com", ["test"], inv_id=1, token="token")
+    finally:
+        await driver
+    assert owned["value"] is False
 
 
 @pytest.mark.asyncio
 async def test_provider_completion_after_ownership_loss_is_rejected(monkeypatch):
     started = asyncio.Event()
+    ownership_lost = asyncio.Event()
     release = asyncio.Event()
     owned = {"value": True}
 
@@ -108,16 +122,30 @@ async def test_provider_completion_after_ownership_loss_is_rejected(monkeypatch)
             return ProviderResult("Gravatar", "ok", findings=[{"finding_type": "profile", "value": "stale"}])
 
     install_fake_providers(monkeypatch, Provider)
-    monkeypatch.setattr(orchestrator, "execution_is_owned", lambda db, inv_id, token: owned["value"])
+    first_check = True
 
-    async def controlled_sleep(_):
+    def ownership_probe(db, inv_id, token):
+        nonlocal first_check
+        if first_check:
+            first_check = False
+            return True
+        ownership_lost.set()
+        return owned["value"]
+
+    monkeypatch.setattr(orchestrator, "execution_is_owned", ownership_probe)
+
+    async def drive_race():
         await started.wait()
         owned["value"] = False
         release.set()
 
-    monkeypatch.setattr(orchestrator.asyncio, "sleep", controlled_sleep)
-    with pytest.raises(orchestrator.ProviderOwnershipLost):
-        await orchestrator.run_providers("test@example.com", "example.com", ["test"], inv_id=1, token="token")
+    driver = asyncio.create_task(drive_race())
+    try:
+        with pytest.raises(orchestrator.ProviderOwnershipLost):
+            await orchestrator.run_providers("test@example.com", "example.com", ["test"], inv_id=1, token="token")
+    finally:
+        await driver
+    assert ownership_lost.is_set()
 
 
 @pytest.mark.asyncio
@@ -189,14 +217,17 @@ async def test_timeout_during_ownership_transition_is_not_accepted(monkeypatch):
     monkeypatch.setattr(orchestrator, "HIBPProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "execution_is_owned", lambda db, inv_id, token: owned["value"])
 
-    async def controlled_sleep(_):
+    async def drive_race():
         await started.wait()
         owned["value"] = False
         release.set()
 
-    monkeypatch.setattr(orchestrator.asyncio, "sleep", controlled_sleep)
-    with pytest.raises(orchestrator.ProviderOwnershipLost):
-        await orchestrator.run_providers("test@example.com", "example.com", ["test"], inv_id=1, token="token")
+    driver = asyncio.create_task(drive_race())
+    try:
+        with pytest.raises(orchestrator.ProviderOwnershipLost):
+            await orchestrator.run_providers("test@example.com", "example.com", ["test"], inv_id=1, token="token")
+    finally:
+        await driver
 
 
 @pytest.mark.asyncio
