@@ -1,5 +1,5 @@
 from app.osint.correlation import CORRELATED, correlate_email_findings
-from app.osint.email import EVIDENCE_CORROBORATED, EVIDENCE_DERIVED, EVIDENCE_OBSERVED
+from app.osint.email import EVIDENCE_CORROBORATED, EVIDENCE_DERIVED, EVIDENCE_OBSERVED, EVIDENCE_SOURCE_ASSOCIATED
 
 
 def test_username_derivation_is_explicit_and_deterministic():
@@ -15,6 +15,17 @@ def test_username_derivation_is_explicit_and_deterministic():
     assert all(r["evidence_state"] == EVIDENCE_DERIVED for r in first["relationships"] if r["relationship"] == "derived_username")
 
 
+def test_duplicate_username_candidates_collapse_without_losing_lineage():
+    result = correlate_email_findings([
+        {"id": 1, "source": "MailRecon", "finding_type": "email", "value": "Alex.Morgan@example.test", "confidence": 1.0, "evidence_state": EVIDENCE_OBSERVED},
+        {"id": 2, "source": "MailRecon", "finding_type": "username_candidate", "value": "alexmorgan", "confidence": 0.0, "evidence_state": EVIDENCE_DERIVED},
+        {"id": 3, "source": "MailRecon", "finding_type": "username_candidate", "value": "AlexMorgan", "confidence": 0.0, "evidence_state": EVIDENCE_DERIVED},
+    ])
+    rels = [r for r in result["relationships"] if r["relationship"] == "derived_username"]
+    assert len(rels) == 1
+    assert rels[0]["supporting_finding_ids"] == [2]
+
+
 def test_public_account_requires_observation_and_does_not_become_identity():
     result = correlate_email_findings([
         {"id": 1, "source": "MailRecon", "finding_type": "email", "value": "alex.morgan@example.test", "confidence": 1.0, "evidence_state": EVIDENCE_OBSERVED},
@@ -26,6 +37,16 @@ def test_public_account_requires_observation_and_does_not_become_identity():
     assert rel["supporting_finding_ids"] == [3]
     assert "not proof" in rel["limitations"].lower()
     assert all("confirmed_person" not in r["relationship"] for r in result["relationships"])
+
+
+def test_gravatar_source_association_remains_observation_not_identity_confirmation():
+    result = correlate_email_findings([
+        {"id": 1, "source": "MailRecon", "finding_type": "email", "value": "alex@example.test", "confidence": 1.0, "evidence_state": EVIDENCE_OBSERVED},
+        {"id": 7, "source": "Gravatar", "finding_type": "profile", "value": "https://gravatar.com/alex", "confidence": 0.95, "evidence_state": EVIDENCE_SOURCE_ASSOCIATED, "raw_reference": {"evidence_state": EVIDENCE_SOURCE_ASSOCIATED}},
+    ])
+    rel = next(r for r in result["relationships"] if r["relationship"] == "public_account_observation")
+    assert rel["evidence_state"] == EVIDENCE_SOURCE_ASSOCIATED
+    assert "human" in rel["limitations"].lower()
 
 
 def test_exact_public_email_is_correlated_as_source_corroboration():
@@ -45,6 +66,16 @@ def test_historical_breach_is_not_current_compromise():
     ])
     rel = next(r for r in result["relationships"] if r["relationship"] == "historical_breach_exposure")
     assert "current compromise" in rel["limitations"]
+
+
+def test_provider_failures_are_not_projected_as_negative_osint_relationships():
+    result = correlate_email_findings([
+        {"id": 1, "source": "MailRecon", "finding_type": "email", "value": "alex@example.test", "confidence": 1.0, "evidence_state": EVIDENCE_OBSERVED},
+        {"id": 2, "source": "GitHub", "finding_type": "provider_status", "value": "rate_limited", "confidence": 1.0, "evidence_state": EVIDENCE_OBSERVED},
+        {"id": 3, "source": "HIBP", "finding_type": "provider_status", "value": "unconfigured", "confidence": 1.0, "evidence_state": EVIDENCE_OBSERVED},
+    ])
+    assert result["relationships"] == []
+    assert result["conflicts"] == []
 
 
 def test_conflicting_provider_observations_are_preserved():
