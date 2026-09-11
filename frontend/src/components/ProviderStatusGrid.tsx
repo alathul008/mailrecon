@@ -1,5 +1,10 @@
 import {Badge} from './Badge';
 import type {Finding} from '../types';
-const states=['ok','unconfigured','rate_limited','unavailable','error','disabled'];
-const tone=(s:string)=>s==='ok'?'good':s==='unconfigured'||s==='disabled'?'warn':'danger';
-export function ProviderStatusGrid({findings}:{findings:Finding[]}){return <div className="glass rounded-2xl p-5"><div className="font-medium">Provider execution</div><p className="mt-1 text-xs text-zinc-500">Operational state is distinct from intelligence. A provider failure is not a negative result.</p><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{findings.map(f=><div key={`${f.source}-${f.id}`} className="rounded-xl border border-white/7 bg-white/[.02] p-3"><div className="flex items-center justify-between gap-3"><div className="font-medium text-sm">{f.source}</div><Badge tone={tone(f.value)}>{states.includes(f.value)?f.value:'unknown'}</Badge></div>{f.notes&&<div className="mt-2 text-xs text-zinc-500">{f.notes}</div>}</div>)}</div>{!findings.length&&<div className="mt-4 text-sm text-zinc-600">No provider status findings recorded.</div>}</div>}
+
+const states=['ok','no_result','unconfigured','rate_limited','unavailable','error','disabled'];
+const tone=(s:string)=>s==='ok'||s==='no_result'?'good':s==='unconfigured'||s==='disabled'?'warn':'danger';
+const label=(s:string)=>s==='ok'?'successful':s==='no_result'?'no result':s==='rate_limited'?'rate limited':s;
+
+export function ProviderStatusGrid({findings}:{findings:Finding[]}){
+ return <div className="glass rounded-2xl p-5"><div className="font-medium">Provider execution</div><p className="mt-1 text-xs text-zinc-500">Operational state is distinct from intelligence. A provider failure, outage, rate limit, or no-result state is not evidence.</p><div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{findings.map(f=><div key={`${f.source}-${f.id}`} className="rounded-xl border border-white/7 bg-white/[.02] p-3"><div className="flex items-center justify-between gap-3"><div className="font-medium text-sm">{f.source}</div><Badge tone={tone(f.value)}>{states.includes(f.value)?label(f.value):'unknown state'}</Badge></div>{f.notes&&<div className="mt-2 text-xs text-zinc-500">{f.notes}</div>}</div>)}</div>{!findings.length&&<div className="mt-4 text-sm text-zinc-600">No provider status findings recorded. This does not mean providers failed.</div>}</div>
+}
