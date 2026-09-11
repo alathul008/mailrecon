@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react';
+import {useCallback,useEffect,useMemo,useState} from 'react';
 import {AlertCircle,FolderSearch,LoaderCircle,Plus,RefreshCw} from 'lucide-react';
 import {deleteInvestigation,listInvestigations} from '../services/api';
 import type {InvestigationSummary,SortKey} from '../services/workspace';
@@ -9,8 +9,8 @@ function riskTone(level:string|null){return level==='high'||level==='critical'?'
 
 export function Investigations({onOpen,onNew}:{onOpen:(id:number)=>void;onNew:()=>void}){
  const [items,setItems]=useState<InvestigationSummary[]>([]); const [query,setQuery]=useState(''); const [status,setStatus]=useState('all'); const [risk,setRisk]=useState('all'); const [sort,setSort]=useState<SortKey>('created_desc'); const [loading,setLoading]=useState(true); const [error,setError]=useState(''); const [deleting,setDeleting]=useState<number|null>(null);
- async function load(){setLoading(true);setError('');try{setItems(await listInvestigations())}catch(e){setError(e instanceof Error?e.message:'Unable to load investigations')}finally{setLoading(false)}}
- useEffect(()=>{load()},[]);
+ const load=useCallback(async()=>{setLoading(true);setError('');try{setItems(await listInvestigations())}catch(e){setError(e instanceof Error?e.message:'Unable to load investigations')}finally{setLoading(false)}},[]);
+ useEffect(()=>{void load()},[load]);
  const visible=useMemo(()=>sortInvestigations(filterInvestigations(items,query,status,risk),sort),[items,query,status,risk,sort]);
  async function remove(id:number){if(!window.confirm(`Permanently delete investigation #${id} and all stored investigation data? This cannot be undone.`))return;setDeleting(id);setError('');try{const result=await deleteInvestigation(id);if(result.status!=='deleted')throw new Error('Unexpected deletion response.');setItems(current=>current.filter(item=>item.id!==id))}catch(e){setError(e instanceof Error?e.message:'Deletion failed')}finally{setDeleting(null)}}
  const statuses=Array.from(new Set(items.map(x=>x.status))).sort();
