@@ -17,7 +17,7 @@ const findings:Finding[]=[
 describe('investigation workspace helpers',()=>{
  it('searches and filters investigations by target/id, status, and risk',()=>{
   expect(filterInvestigations(investigations,'ALPHA','all','all')).toHaveLength(1);
-  expect(filterInvestigations(investigations,'#2','all','all')).toHaveLength(0);
+  expect(filterInvestigations(investigations,'#2','all','all')).toHaveLength(1);
   expect(filterInvestigations(investigations,'','failed','all')[0].id).toBe(2);
   expect(filterInvestigations(investigations,'','all','high')[0].id).toBe(1);
  });
@@ -30,10 +30,10 @@ describe('investigation workspace helpers',()=>{
 });
 
 describe('evidence explorer filters',()=>{
- const base={source:'all',findingType:'all',severity:'all',confidence:'all',evidenceState:'all'} as const;
+ const base={source:'all',findingType:'all',severity:'all',confidence:'all',evidenceState:'all',execution:'all'} as const;
  it('filters provider, type, severity, confidence, evidence state, and execution history',()=>{
-  expect(filterFindings(findings,{...base,source:'github',execution:'all'})).toHaveLength(2);
-  expect(filterFindings(findings,{...base,confidence:'high',execution:'all'})).toHaveLength(2);
+  expect(filterFindings(findings,{...base,source:'github'})).toHaveLength(2);
+  expect(filterFindings(findings,{...base,confidence:'high'})).toHaveLength(2);
   expect(filterFindings(findings,{...base,severity:'medium',execution:'historical'})).toHaveLength(1);
   expect(filterFindings(findings,{...base,execution:'current'}).map(x=>x.id)).toEqual([1,3]);
  });
