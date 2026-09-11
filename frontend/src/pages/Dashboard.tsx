@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, ShieldCheck, Database, Activity, ArrowUpRight, LockKeyhole, RefreshCw } from 'lucide-react';
 import { listInvestigations } from '../services/api';
 import { Badge } from '../components/Badge';
@@ -17,7 +17,7 @@ export function Dashboard({ onLookup, onOpen }: { onLookup: () => void; onOpen: 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -27,9 +27,9 @@ export function Dashboard({ onLookup, onOpen }: { onLookup: () => void; onOpen: 
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [load]);
 
   const high = items.filter((x) => x.risk_level === 'HIGH' || x.risk_level === 'CRITICAL').length;
   const avg = items.length ? Math.round(items.reduce((a, x) => a + (x.risk_score || 0), 0) / items.length) : 0;
@@ -47,7 +47,7 @@ export function Dashboard({ onLookup, onOpen }: { onLookup: () => void; onOpen: 
     <div className="grid gap-4 lg:grid-cols-3">
       <div className="glass rounded-2xl p-6 lg:col-span-2">
         <div className="flex items-center justify-between"><div><div className="font-medium">Recent investigations</div><div className="text-xs text-zinc-500">Open an investigation to inspect evidence, providers, timeline, graph, and reports.</div></div><button aria-label="Refresh recent investigations" onClick={() => void load()} className="rounded-lg border border-white/10 p-2 text-zinc-400 hover:bg-white/[.05] hover:text-white"><RefreshCw size={15}/></button></div>
-        {error && <div role="alert" className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}
+        {error && <div role="alert" className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300"><div>{error}</div><button onClick={() => void load()} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-400/20 px-3 py-1.5 text-xs hover:bg-red-500/10">Retry</button></div>}
         <div className="mt-5 space-y-2">
           {loading ? <div className="py-12 text-center text-sm text-zinc-600">Loading recent investigations…</div> : items.slice(0, 8).map((x) => <button key={x.id} onClick={() => onOpen(x.id)} className="flex w-full items-center justify-between rounded-xl border border-white/6 p-3 text-left hover:bg-white/[.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"><div className="min-w-0"><div className="truncate text-sm">{x.target}</div><div className="text-xs text-zinc-600">{new Date(x.created_at).toLocaleString()} · #{x.id}</div></div><div className="flex shrink-0 items-center gap-3 pl-3"><span className="font-mono text-sm">{x.risk_score ?? '—'}</span><Badge tone={x.risk_level === 'HIGH' || x.risk_level === 'CRITICAL' ? 'danger' : x.risk_level === 'MEDIUM' ? 'warn' : 'good'}>{x.risk_level || x.status}</Badge><ArrowUpRight size={15} className="text-zinc-600"/></div></button>)}
           {!loading && !items.length && !error && <div className="py-12 text-center text-sm text-zinc-600">No investigations yet. Start with an email lookup.</div>}
