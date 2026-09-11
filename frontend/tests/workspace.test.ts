@@ -83,7 +83,6 @@ function installWindowHarness(){
   removeEventListener:(name:string,fn:()=>void)=>{listeners.get(name)?.delete(fn)},
   dispatchEvent:(event:Event)=>{listeners.get(event.type)?.forEach(fn=>fn());return true},
  };
- return (name:string)=>window.dispatchEvent(new Event(name));
 }
 
 function textOf(node:any):string{
@@ -126,26 +125,25 @@ describe('Phase 20 investigation workspace UI',()=>{
   const {Investigations}=await import('../src/pages/Investigations');
   const react=await import('react') as typeof import('react') & {__rewindHooks:()=>void};
   react.__rewindHooks();
-  let tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});
+  let onOpen=vi.fn(); let tree=Investigations({onOpen,onNew:vi.fn()});
   expect(textOf(tree)).toContain('Loading investigations');
   await Promise.resolve(); await Promise.resolve(); react.__rewindHooks();
-  tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});
+  tree=Investigations({onOpen,onNew:vi.fn()});
   expect(textOf(tree)).toContain('alpha@example.com');
   const search=allElements(tree).find(el=>el.type==='input'&&el.props?.['aria-label']==='Search investigations');
-  expect(search).toBeTruthy(); search.props.onChange({target:{value:'beta'}}); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()});
+  expect(search).toBeTruthy(); search.props.onChange({target:{value:'beta'}}); react.__rewindHooks(); tree=Investigations({onOpen,onNew:vi.fn()});
   expect(textOf(tree)).toContain('beta@example.com'); expect(textOf(tree)).not.toContain('alpha@example.com');
   const status=allElements(tree).find(el=>el.type==='select'&&el.props?.['aria-label']==='Filter status');
-  status.props.onChange({target:{value:'failed'}}); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).toContain('beta@example.com');
-  const open=button(tree,'Open'); open.props.onClick();
-  const onOpen=vi.fn(); const fresh=Investigations({onOpen,onNew:vi.fn()}); button(fresh,'Open').props.onClick(); expect(onOpen).toHaveBeenCalledWith(2);
-  const sort=allElements(fresh).find(el=>el.type==='select'&&el.props?.['aria-label']==='Sort investigations'); sort.props.onChange({target:{value:'risk_desc'}}); react.__rewindHooks(); const sorted=Investigations({onOpen,onNew:vi.fn()}); expect(textOf(sorted).indexOf('beta@example.com')).toBeLessThan(0);
-  vi.mocked(api.listInvestigations).mockResolvedValue([]); react.__resetHooks(); react.__rewindHooks(); const empty=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(empty)).toContain('Loading investigations'); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); const emptyRendered=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(emptyRendered)).toContain('No investigations yet');
+  status.props.onChange({target:{value:'failed'}}); react.__rewindHooks(); tree=Investigations({onOpen,onNew:vi.fn()}); expect(textOf(tree)).toContain('beta@example.com');
+  const open=button(tree,'Open'); open.props.onClick(); expect(onOpen).toHaveBeenCalledWith(2);
+  const sort=allElements(tree).find(el=>el.type==='select'&&el.props?.['aria-label']==='Sort investigations'); sort.props.onChange({target:{value:'risk_desc'}}); react.__rewindHooks(); tree=Investigations({onOpen,onNew:vi.fn()}); expect(textOf(tree)).toContain('beta@example.com');
+  vi.mocked(api.listInvestigations).mockResolvedValue([]); react.__resetHooks(); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).toContain('Loading investigations'); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).toContain('No investigations yet');
   vi.mocked(api.listInvestigations).mockRejectedValue(new Error('load failed')); react.__resetHooks(); react.__rewindHooks(); Investigations({onOpen:vi.fn(),onNew:vi.fn()}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); expect(textOf(Investigations({onOpen:vi.fn(),onNew:vi.fn()}))).toContain('load failed');
  });
 
  it('deletes an investigation after confirmation and removes it from the workspace',async()=>{
   const api=await import('../src/services/api'); vi.mocked(api.listInvestigations).mockResolvedValue(investigations); vi.mocked(api.deleteInvestigation).mockResolvedValue({id:2,status:'deleted'});
-  const {Investigations}=await import('../src/pages/Investigations'); const react=await import('react') as typeof import('react') & {__resetHooks:()=>void;__rewindHooks:()=>void}; react.__resetHooks(); react.__rewindHooks(); Investigations({onOpen:vi.fn(),onNew:vi.fn()}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); let tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); const deletes=allElements(tree).filter(el=>el.type==='button'&&el.props?.children&&textOf(el).includes('Delete')); expect(deletes.length).toBeGreaterThan(0); await deletes[0].props.onClick(); expect(window.confirm).toHaveBeenCalled(); expect(api.deleteInvestigation).toHaveBeenCalledWith(2); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).not.toContain('beta@example.com');
+  const {Investigations}=await import('../src/pages/Investigations'); const react=await import('react') as typeof import('react') & {__resetHooks:()=>void;__rewindHooks:()=>void}; react.__resetHooks(); react.__rewindHooks(); Investigations({onOpen:vi.fn(),onNew:vi.fn()}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); let tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); const betaRow=allElements(tree).find(el=>el.type==='tr'&&textOf(el).includes('beta@example.com')); expect(betaRow).toBeTruthy(); const deleteButton=allElements(betaRow).find(el=>el.type==='button'&&textOf(el).includes('Delete')); expect(deleteButton).toBeTruthy(); await deleteButton.props.onClick(); expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Permanently delete investigation #2')); expect(api.deleteInvestigation).toHaveBeenCalledWith(2); react.__rewindHooks(); tree=Investigations({onOpen:vi.fn(),onNew:vi.fn()}); expect(textOf(tree)).not.toContain('beta@example.com');
  });
 });
 
@@ -162,8 +160,8 @@ describe('Phase 20 detail, evidence, provider, execution, pivot and reports UI',
 
  it('allows only email findings to pivot, creates a separate investigation, and never claims identity confirmation',async()=>{
   const api=await import('../src/services/api'); vi.mocked(api.getInvestigation).mockResolvedValue(detailedInvestigation as any); vi.mocked(api.getTimeline).mockResolvedValue([] as any); vi.mocked(api.createInvestigation).mockResolvedValue({id:9,status:'queued'});
-  const {Investigation}=await import('../src/pages/Investigation'); const react=await import('react') as typeof import('react') & {__resetHooks:()=>void;__rewindHooks:()=>void}; react.__resetHooks(); react.__rewindHooks(); Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); let tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()}); button(tree,'Evidence').props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()}); const emailRow=allElements(tree).find(el=>el.type==='tr'&&textOf(el).includes('alpha@example.com')); emailRow.props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()}); const pivot=button(tree,'Pivot to separate investigation'); expect(pivot.props.disabled).toBe(false); const onOpen=vi.fn(); react.__resetHooks(); react.__rewindHooks(); Investigation({id:1,onBack:vi.fn(),onOpen}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); button(tree,'Evidence').props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); allElements(tree).find(el=>el.type==='tr'&&textOf(el).includes('alpha@example.com')).props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); await button(tree,'Pivot to separate investigation').props.onClick(); expect(api.createInvestigation).toHaveBeenCalledWith('alpha@example.com',false,true); expect(onOpen).toHaveBeenCalledWith(9); expect(textOf(tree)).toContain('never confirms identity or merges investigations');
-  const dnsRow=allElements(tree).find(el=>el.type==='tr'&&textOf(el).includes('mail.example.com')); dnsRow?.props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen:vi.fn()}); const disabledPivot=button(tree,'Pivot to separate investigation'); expect(disabledPivot.props.disabled).toBe(true);
+  const {Investigation}=await import('../src/pages/Investigation'); const react=await import('react') as typeof import('react') & {__resetHooks:()=>void;__rewindHooks:()=>void}; const onOpen=vi.fn(); react.__resetHooks(); react.__rewindHooks(); let tree=Investigation({id:1,onBack:vi.fn(),onOpen}); await Promise.resolve(); await Promise.resolve(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); button(tree,'Evidence').props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); allElements(tree).find(el=>el.type==='tr'&&textOf(el).includes('alpha@example.com')).props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); const pivot=button(tree,'Pivot to separate investigation'); expect(pivot.props.disabled).toBe(false); await pivot.props.onClick(); expect(api.createInvestigation).toHaveBeenCalledWith('alpha@example.com',false,true); expect(onOpen).toHaveBeenCalledWith(9); expect(textOf(tree)).toContain('never confirms identity or merges investigations');
+  react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); const dnsRow=allElements(tree).find(el=>el.type==='tr'&&textOf(el).includes('mail.example.com')); expect(dnsRow).toBeTruthy(); dnsRow.props.onClick(); react.__rewindHooks(); tree=Investigation({id:1,onBack:vi.fn(),onOpen}); expect(button(tree,'Pivot to separate investigation').props.disabled).toBe(true);
  });
 
  it('renders report actions and invokes the existing report API, and handles auth-required events',async()=>{
