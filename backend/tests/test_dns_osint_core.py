@@ -6,9 +6,17 @@ import dns.resolver
 from app.osint import dns as dns_osint
 
 
+class FakeRecord:
+    def __init__(self, value):
+        self.value = value
+
+    def to_text(self):
+        return self.value
+
+
 class FakeAnswer:
     def __init__(self, values):
-        self.values = values
+        self.values = [FakeRecord(value) for value in values]
 
     def __iter__(self):
         return iter(self.values)
