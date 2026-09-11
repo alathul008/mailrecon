@@ -32,6 +32,33 @@ export type GraphData = {
   edges: GraphEdge[];
 };
 
+export type CorrelationRelationship = {
+  source: string;
+  target: string;
+  relationship: string;
+  evidence_state: string;
+  confidence: number;
+  supporting_finding_ids: number[];
+  explanation: string;
+  limitations: string;
+};
+
+export type CorrelationConflict = {
+  finding_type: string;
+  values: string[];
+  provider_sources: string[];
+  finding_ids: number[];
+  explanation: string;
+};
+
+export type CorrelationResult = {
+  target_email: string | null;
+  domain: string | null;
+  relationships: CorrelationRelationship[];
+  conflicts: CorrelationConflict[];
+  semantics: Record<string, string>;
+};
+
 // Keep the bearer key for the current browser tab/session only; never persist it
 // across browser restarts in localStorage.
 export function getApiKey() {
@@ -171,6 +198,10 @@ export function getGraph(id: number) {
 
 export function getTimeline(id: number) {
   return request<TimelineEvent[]>(`/investigations/${id}/timeline`);
+}
+
+export function getCorrelations(id: number) {
+  return request<CorrelationResult>(`/investigations/${id}/correlations`);
 }
 
 export function reportUrl(id: number, format: string) {
