@@ -7,7 +7,19 @@ import { Investigations } from './pages/Investigations';
 import { Investigation } from './pages/Investigation';
 import { Comparison } from './pages/Comparison';
 
-type Route = { page: 'Dashboard' | 'Investigations' | 'Email Lookup' | 'Investigation' | 'Graph' | 'Comparison'; id?: number; left?: number; right?: number };
+type InvestigationTab = 'Overview' | 'Correlations' | 'Evidence' | 'Providers' | 'Timeline' | 'Graph' | 'Reports';
+type Route = { page: 'Dashboard' | 'Investigations' | 'Email Lookup' | 'Investigation' | 'Graph' | 'Comparison'; id?: number; left?: number; right?: number; tab?: InvestigationTab };
+
+const tabBySlug: Record<string, InvestigationTab> = {
+  overview: 'Overview',
+  correlations: 'Correlations',
+  evidence: 'Evidence',
+  providers: 'Providers',
+  timeline: 'Timeline',
+  graph: 'Graph',
+  reports: 'Reports',
+};
+const slugByTab: Record<InvestigationTab, string> = Object.fromEntries(Object.entries(tabBySlug).map(([slug, tab]) => [tab, slug])) as Record<InvestigationTab, string>;
 
 export function parseRoute(hash: string): Route {
   const value = hash.replace(/^#\/?/, '');
@@ -16,8 +28,13 @@ export function parseRoute(hash: string): Route {
   const compare = value.match(/^compare\/(\d+)\/(\d+)$/);
   if (compare) return { page: 'Comparison', left: Number(compare[1]), right: Number(compare[2]) };
   if (value === 'compare') return { page: 'Comparison' };
-  const match = value.match(/^(investigation|graph)\/(\d+)$/);
-  if (match) return { page: match[1] === 'investigation' ? 'Investigation' : 'Graph', id: Number(match[2]) };
+  const match = value.match(/^(investigation|graph)\/(\d+)(?:\/([a-z-]+))?$/);
+  if (match) {
+    if (match[1] === 'graph') return { page: 'Graph', id: Number(match[2]) };
+    const tab = match[3] ? tabBySlug[match[3]] : undefined;
+    if (match[3] && !tab) return { page: 'Dashboard' };
+    return { page: 'Investigation', id: Number(match[2]), tab };
+  }
   return { page: 'Dashboard' };
 }
 
@@ -31,8 +48,8 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  const navigate = (page: Route['page'], id?: number, left?: number, right?: number) => {
-    const hash = page === 'Dashboard' ? '#/' : page === 'Investigations' ? '#/investigations' : page === 'Email Lookup' ? '#/lookup' : page === 'Comparison' ? (left && right ? `#/compare/${left}/${right}` : '#/compare') : `#/${page === 'Investigation' ? 'investigation' : 'graph'}/${id}`;
+  const navigate = (page: Route['page'], id?: number, left?: number, right?: number, tab?: InvestigationTab) => {
+    const hash = page === 'Dashboard' ? '#/' : page === 'Investigations' ? '#/investigations' : page === 'Email Lookup' ? '#/lookup' : page === 'Comparison' ? (left && right ? `#/compare/${left}/${right}` : '#/compare') : `#/${page === 'Investigation' ? 'investigation' : 'graph'}/${id}${page === 'Investigation' && tab && tab !== 'Overview' ? `/${slugByTab[tab]}` : ''}`;
     window.location.hash = hash;
   };
 
@@ -40,7 +57,7 @@ export default function App() {
   if (route.page === 'Dashboard') page = <Dashboard onLookup={() => navigate('Email Lookup')} onOpen={(id) => navigate('Investigation', id)} />;
   else if (route.page === 'Email Lookup') page = <Lookup onGraph={(id) => navigate('Graph', id)} />;
   else if (route.page === 'Investigations') page = <Investigations onOpen={(id) => navigate('Investigation', id)} onNew={() => navigate('Email Lookup')} onCompare={() => navigate('Comparison')} />;
-  else if (route.page === 'Investigation' && route.id !== undefined) page = <Investigation id={route.id} onBack={() => navigate('Investigations')} onOpen={(id) => navigate('Investigation', id)} />;
+  else if (route.page === 'Investigation' && route.id !== undefined) page = <Investigation id={route.id} initialTab={route.tab} onBack={() => navigate('Investigations')} onOpen={(id) => navigate('Investigation', id)} onTab={(tab) => navigate('Investigation', route.id, undefined, undefined, tab)} />;
   else if (route.page === 'Graph' && route.id !== undefined) page = <Graph id={route.id} />;
   else if (route.page === 'Comparison') page = <Comparison onBack={() => navigate('Investigations')} initialLeft={route.left} initialRight={route.right} />;
   else page = <Dashboard onLookup={() => navigate('Email Lookup')} onOpen={(id) => navigate('Investigation', id)} />;
