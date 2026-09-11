@@ -50,17 +50,17 @@ Every risk contribution is stored as a finding so an analyst can inspect *why* t
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.lock
 uvicorn app.main:app --reload --port 8000
 ```
 
-Create `.env` from `.env.example` and set a strong `MAILRECON_API_KEY` before using protected endpoints.
+Create `.env` from `.env.example` and set a strong `MAILRECON_API_KEY` before using protected endpoints. The lock file freezes the resolved backend dependency graph used by the release CI and production image.
 
 ### Frontend
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
