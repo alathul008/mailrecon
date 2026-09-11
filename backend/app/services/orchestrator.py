@@ -104,8 +104,10 @@ async def _provider_tasks_owned(inv_id,token,tasks,*,poll_interval=0.25):
         await asyncio.sleep(poll_interval)
         with SessionLocal() as db:
             if not execution_is_owned(db,inv_id,token):
-                await _cancel_provider_tasks(tasks)
                 raise ProviderOwnershipLost("Provider work abandoned after execution ownership was lost")
+
+def _provider_tasks_outcome(tasks):
+    return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
 
 async def _run_provider_call(provider_call):
     return await provider_call()
@@ -118,19 +120,30 @@ async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:in
     tasks=[asyncio.create_task(_run_provider_call(call)) for call in calls]
     if inv_id is None or token is None:return await asyncio.gather(*tasks,return_exceptions=True)
     monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks))
+    gathered=None
     try:
-        results=await asyncio.gather(*tasks,return_exceptions=True)
-        await monitor
+        done,pending=await asyncio.wait([*tasks,monitor],return_when=asyncio.FIRST_COMPLETED)
+        if monitor in done:
+            exc=monitor.exception()
+            if exc is not None:
+                await _cancel_provider_tasks(tasks)
+                raise exc
+            if all(task.done() for task in tasks):
+                gathered=_provider_tasks_outcome(tasks)
+            else:
+                await _cancel_provider_tasks(tasks)
+                raise ProviderOwnershipLost("Provider work abandoned after execution ownership was lost")
+        else:
+            gathered=_provider_tasks_outcome(tasks)
+            await monitor
         with SessionLocal() as db:_require_ownership(db,inv_id,token)
-        return results
-    except ProviderOwnershipLost:
-        await _cancel_provider_tasks(tasks)
-        raise
+        return gathered
     finally:
         if not monitor.done():
             monitor.cancel()
             try:await monitor
             except asyncio.CancelledError:pass
+        await _cancel_provider_tasks(tasks)
 
 def _finding_evidence_state(row):
     state=getattr(row,"evidence_state",None)
