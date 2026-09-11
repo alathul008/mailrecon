@@ -54,18 +54,22 @@ beforeEach(async () => {
   (await import('react') as any).__reset();
 });
 
-describe('Phase 21 navigation integrity', () => {
+describe('Phase 28 navigation and workflow integrity', () => {
   it('maps supported hash routes and safely falls back for invalid routes', async () => {
     const { parseRoute } = await import('../src/App');
     expect(parseRoute('#/')).toEqual({ page: 'Dashboard' });
     expect(parseRoute('#/investigations')).toEqual({ page: 'Investigations' });
     expect(parseRoute('#/lookup')).toEqual({ page: 'Email Lookup' });
     expect(parseRoute('#/investigation/42')).toEqual({ page: 'Investigation', id: 42 });
+    expect(parseRoute('#/investigation/42/evidence')).toEqual({ page: 'Investigation', id: 42, tab: 'Evidence' });
+    expect(parseRoute('#/investigation/42/correlations')).toEqual({ page: 'Investigation', id: 42, tab: 'Correlations' });
+    expect(parseRoute('#/investigation/42/reports')).toEqual({ page: 'Investigation', id: 42, tab: 'Reports' });
     expect(parseRoute('#/graph/42')).toEqual({ page: 'Graph', id: 42 });
     expect(parseRoute('#/compare')).toEqual({ page: 'Comparison' });
     expect(parseRoute('#/compare/7/8')).toEqual({ page: 'Comparison', left: 7, right: 8 });
     expect(parseRoute('#/unknown')).toEqual({ page: 'Dashboard' });
     expect(parseRoute('#/investigation/not-an-id')).toEqual({ page: 'Dashboard' });
+    expect(parseRoute('#/investigation/42/not-a-tab')).toEqual({ page: 'Dashboard' });
   });
 
   it('renders only implemented primary navigation and opens/closes mobile navigation', async () => {
