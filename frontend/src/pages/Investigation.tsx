@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useCallback,useEffect,useState} from 'react';
 import {ArrowLeft,Download,LoaderCircle,Network,RefreshCw,Trash2} from 'lucide-react';
 import {deleteInvestigation,downloadReport,getInvestigation,getTimeline,createInvestigation} from '../services/api';
 import type {Finding,Investigation as InvestigationType,TimelineEvent} from '../types';
@@ -17,8 +17,8 @@ type Tab=typeof tabs[number];
 
 export function Investigation({id,onBack,onOpen}:{id:number;onBack:()=>void;onOpen:(id:number)=>void}){
  const [inv,setInv]=useState<InvestigationType|null>(null);const [timeline,setTimeline]=useState<TimelineEvent[]>([]);const [tab,setTab]=useState<Tab>('Overview');const [loading,setLoading]=useState(true);const [error,setError]=useState('');const [deleting,setDeleting]=useState(false);const [pivoting,setPivoting]=useState(false);
- async function load(){setLoading(true);setError('');try{const data=await getInvestigation(id);setInv(data);setTimeline(await getTimeline(id))}catch(e){setError(e instanceof Error?e.message:'Unable to load investigation')}finally{setLoading(false)}}
- useEffect(()=>{load()},[id]);
+ const load=useCallback(async()=>{setLoading(true);setError('');try{const data=await getInvestigation(id);setInv(data);setTimeline(await getTimeline(id))}catch(e){setError(e instanceof Error?e.message:'Unable to load investigation')}finally{setLoading(false)}},[id]);
+ useEffect(()=>{void load()},[load]);
  useEffect(()=>{if(!inv||!['queued','running'].includes(inv.status))return;const timer=window.setInterval(async()=>{try{const data=await getInvestigation(id);setInv(data);if(data.status!=='queued'&&data.status!=='running')setTimeline(await getTimeline(id))}catch(e){setError(e instanceof Error?e.message:'Unable to refresh investigation')}},2000);return()=>window.clearInterval(timer)},[id,inv?.status]);
  useEffect(()=>{const onAuth=()=>setError('Authentication required. Enter your MailRecon API key before continuing.');window.addEventListener('mailrecon:auth-required',onAuth);return()=>window.removeEventListener('mailrecon:auth-required',onAuth)},[]);
  const dimensions=Object.fromEntries((inv?.findings||[]).filter(f=>f.finding_type==='risk_dimension').map(f=>{const [k,v]=f.value.split('=');return [k,Number(v)]}));
