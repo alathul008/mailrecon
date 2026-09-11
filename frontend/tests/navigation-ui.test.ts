@@ -12,6 +12,8 @@ vi.mock('react', async () => {
       if (!(i in state)) state[i] = initial;
       return [state[i], (next: T | ((value: T) => T)) => { state[i] = typeof next === 'function' ? (next as (value: T) => T)(state[i] as T) : next; }] as const;
     },
+    useMemo: <T,>(fn: () => T) => { cursor++; return fn(); },
+    useCallback: <T,>(fn: T) => { cursor++; return fn; },
     useEffect: (fn: () => void | (() => void)) => {
       const i = cursor++;
       if (!effects.has(i)) { effects.add(i); void fn(); }
@@ -20,6 +22,8 @@ vi.mock('react', async () => {
     __rewind: () => { cursor = 0; },
   };
 });
+
+vi.mock('../src/services/api', () => ({ listInvestigations: vi.fn() }));
 
 function text(node: any): string {
   if (node == null || typeof node === 'boolean') return '';
@@ -45,6 +49,7 @@ function installWindow() {
 
 beforeEach(async () => {
   installWindow();
+  vi.clearAllMocks();
   (await import('react') as any).__reset();
 });
 
@@ -76,9 +81,37 @@ describe('Phase 21 navigation integrity', () => {
     open.props.onClick();
     r.__rewind();
     tree = Layout({ active: 'Dashboard', onNav, children: 'content' });
-    expect(text(tree)).toContain('Mobile primary navigation');
+    expect(elements(tree).some((e) => e.props?.['aria-label'] === 'Mobile primary navigation')).toBe(true);
     const mobileInvestigation = elements(tree).find((e) => e.type === 'button' && text(e) === 'Investigations');
     mobileInvestigation.props.onClick();
     expect(onNav).toHaveBeenCalledWith('Investigations');
+  });
+
+  it('makes dashboard investigations actionable and exposes retry on load failure', async () => {
+    const api = await import('../src/services/api');
+    vi.mocked(api.listInvestigations).mockResolvedValue([{ id: 7, target: 'alpha@example.com', status: 'completed', risk_score: 80, risk_level: 'HIGH', created_at: '2026-01-01T00:00:00Z' }]);
+    const { Dashboard } = await import('../src/pages/Dashboard');
+    const r = await import('react') as any;
+    const onOpen = vi.fn();
+    r.__rewind();
+    Dashboard({ onLookup: vi.fn(), onOpen });
+    await Promise.resolve();
+    await Promise.resolve();
+    r.__rewind();
+    let tree = Dashboard({ onLookup: vi.fn(), onOpen });
+    const investigation = elements(tree).find((e) => e.type === 'button' && text(e).includes('alpha@example.com'));
+    investigation.props.onClick();
+    expect(onOpen).toHaveBeenCalledWith(7);
+
+    vi.mocked(api.listInvestigations).mockRejectedValue(new Error('load failed'));
+    r.__reset();
+    r.__rewind();
+    Dashboard({ onLookup: vi.fn(), onOpen });
+    await Promise.resolve();
+    await Promise.resolve();
+    r.__rewind();
+    tree = Dashboard({ onLookup: vi.fn(), onOpen });
+    expect(text(tree)).toContain('load failed');
+    expect(text(tree)).toContain('Retry');
   });
 });
