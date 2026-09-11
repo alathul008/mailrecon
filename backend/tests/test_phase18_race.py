@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from datetime import timedelta
 
 import httpx
@@ -30,10 +31,17 @@ def add_investigation(db):
 
 
 def install_fake_providers(monkeypatch, factory):
-    monkeypatch.setattr(orchestrator, "GravatarProvider", lambda: factory("Gravatar"))
-    monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: factory("RDAP"))
-    monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: factory("GitHub"))
-    monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: factory("Have I Been Pwned"))
+    def make(name):
+        try:
+            inspect.signature(factory).bind(name)
+        except TypeError:
+            return factory()
+        return factory(name)
+
+    monkeypatch.setattr(orchestrator, "GravatarProvider", lambda: make("Gravatar"))
+    monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: make("RDAP"))
+    monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: make("GitHub"))
+    monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: make("Have I Been Pwned"))
 
 
 @pytest.mark.asyncio
