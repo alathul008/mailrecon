@@ -62,6 +62,8 @@ describe('Phase 21 navigation integrity', () => {
     expect(parseRoute('#/lookup')).toEqual({ page: 'Email Lookup' });
     expect(parseRoute('#/investigation/42')).toEqual({ page: 'Investigation', id: 42 });
     expect(parseRoute('#/graph/42')).toEqual({ page: 'Graph', id: 42 });
+    expect(parseRoute('#/compare')).toEqual({ page: 'Comparison' });
+    expect(parseRoute('#/compare/7/8')).toEqual({ page: 'Comparison', left: 7, right: 8 });
     expect(parseRoute('#/unknown')).toEqual({ page: 'Dashboard' });
     expect(parseRoute('#/investigation/not-an-id')).toEqual({ page: 'Dashboard' });
   });
