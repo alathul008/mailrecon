@@ -4,6 +4,24 @@ from typing import Any
 
 PROVIDER_STATUSES = {"ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled"}
 
+
+@dataclass(frozen=True)
+class ProviderContext:
+    """Canonical normalized input supplied to every executable provider."""
+
+    email: str
+    domain: str
+    candidates: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if not isinstance(self.email, str) or not self.email:
+            raise ValueError("ProviderContext.email must be a non-empty normalized email")
+        if not isinstance(self.domain, str) or not self.domain:
+            raise ValueError("ProviderContext.domain must be a non-empty normalized domain")
+        if not all(isinstance(candidate, str) and candidate for candidate in self.candidates):
+            raise ValueError("ProviderContext.candidates must contain non-empty strings")
+
+
 @dataclass
 class ProviderResult:
     provider: str
@@ -11,14 +29,18 @@ class ProviderResult:
     findings: list[dict[str, Any]] = field(default_factory=list)
     message: str | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
     def __post_init__(self):
         if self.status not in PROVIDER_STATUSES:
             raise ValueError(f"Unsupported provider status: {self.status}")
 
+
 def _evidence_state_from_notes(notes: str | None) -> str | None:
-    marker="Evidence state: "
-    if marker not in (notes or ""): return None
-    return notes.split(marker,1)[1].split(".",1)[0].strip() or None
+    marker = "Evidence state: "
+    if marker not in (notes or ""):
+        return None
+    return notes.split(marker, 1)[1].split(".", 1)[0].strip() or None
+
 
 def finding(source, finding_type, value, confidence=0.5, severity="info", source_url=None, notes=None, raw_reference=None, first_seen=None, last_seen=None, evidence_state=None):
-    return {"source":source,"source_url":source_url,"finding_type":finding_type,"value":value,"confidence":confidence,"severity":severity,"evidence_state":evidence_state or _evidence_state_from_notes(notes),"notes":notes,"raw_reference":raw_reference,"first_seen":first_seen,"last_seen":last_seen,"collected_at":datetime.now(timezone.utc)}
+    return {"source": source, "source_url": source_url, "finding_type": finding_type, "value": value, "confidence": confidence, "severity": severity, "evidence_state": evidence_state or _evidence_state_from_notes(notes), "notes": notes, "raw_reference": raw_reference, "first_seen": first_seen, "last_seen": last_seen, "collected_at": datetime.now(timezone.utc)}
