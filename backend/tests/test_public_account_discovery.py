@@ -58,7 +58,8 @@ def test_corroborated_match_and_confidence_are_preserved():
     row = next(r for r in rows if r["service"] == "GitLab")
     assert row["status"] == "FOUND"
     assert row["confidence"] == .95
-    assert row["evidence"][0]["source"] == "GitLab"
+    assert row["evidence"][0]["evidence_state"] == "corroborated_match"
+    assert row["evidence"][0]["source_url"] == "https://gitlab.com/example"
 
 
 def test_duplicate_findings_are_removed():
