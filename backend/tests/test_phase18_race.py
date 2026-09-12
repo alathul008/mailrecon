@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.db.session import Base
 from app.models import ExecutionAttempt, Finding, Investigation, ModuleRun
 from app.providers.base import ProviderResult
+from app.providers.registry import provider_definitions
 from app.services import lifecycle, orchestrator
 
 
@@ -38,16 +39,14 @@ def install_fake_providers(monkeypatch, factory):
             return factory()
         return factory(name)
 
-    monkeypatch.setattr(orchestrator, "GravatarProvider", lambda: make("Gravatar"))
-    monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: make("RDAP"))
-    monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: make("GitHub"))
-    monkeypatch.setattr(orchestrator, "GitLabProvider", lambda: make("GitLab"))
-    monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: make("Have I Been Pwned"))
+    for definition in provider_definitions(orchestrated=True):
+        if definition.factory_symbol:
+            monkeypatch.setattr(orchestrator, definition.factory_symbol, lambda definition=definition: make(definition.name))
 
 
 @pytest.mark.asyncio
 async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
-    names = ("Gravatar", "RDAP", "GitHub", "GitLab", "Have I Been Pwned")
+    names = tuple(item.name for item in provider_definitions(orchestrated=True) if item.factory)
     started = {name: asyncio.Event() for name in names}
     cancelled = {name: asyncio.Event() for name in names}
     provider_tasks = []
@@ -78,7 +77,7 @@ async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
 
     assert all(event.is_set() for event in started.values())
     assert all(event.is_set() for event in cancelled.values())
-    assert len(provider_tasks) == 5
+    assert len(provider_tasks) == len(names)
     assert all(task.done() for task in provider_tasks)
 
 
@@ -220,13 +219,13 @@ async def test_timeout_during_ownership_transition_is_not_accepted(monkeypatch):
             await release.wait()
             raise httpx.ReadTimeout("provider timeout")
     class SlowProvider:
-        async def run(self, *args):
-            await asyncio.Event().wait()
+        async def run(self, *args): await asyncio.Event().wait()
 
     monkeypatch.setattr(orchestrator, "GravatarProvider", TimeoutProvider)
     monkeypatch.setattr(orchestrator, "RDAPProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "GitHubProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "GitLabProvider", SlowProvider)
+    monkeypatch.setattr(orchestrator, "PublicWebProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "HIBPProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "execution_is_owned", lambda db, inv_id, token: owned["value"])
 
