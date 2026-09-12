@@ -1,10 +1,9 @@
-import json
 from urllib.parse import quote_plus, urlparse
 
 import httpx
 
 from app.core.config import get_settings
-from app.osint.email import EVIDENCE_OBSERVED, EVIDENCE_POSSIBLE
+from app.osint.email import EVIDENCE_POSSIBLE
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
