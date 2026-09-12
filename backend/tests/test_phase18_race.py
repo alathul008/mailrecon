@@ -65,7 +65,7 @@ async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
 async def test_provider_completion_before_final_ownership_check_is_rejected(monkeypatch):
     provider_done=asyncio.Event(); release_monitor=asyncio.Event(); owned={"value":True}
     class Provider:
-        async def run(self,*args): provider_done.set(); await release_monitor.wait(); return ProviderResult("Gravatar","ok",findings=[{"finding_type":"profile","value":"stale"}])
+        async def run(self,*args): provider_done.set(); await release_monitor.wait(); return ProviderResult(self.name,"ok",findings=[{"finding_type":"profile","value":"stale"}])
     install_fake_providers(monkeypatch,Provider)
     ownership_checked=asyncio.Event()
     def ownership_probe(db,inv_id,token): ownership_checked.set(); return owned["value"]
@@ -82,7 +82,7 @@ async def test_provider_completion_before_final_ownership_check_is_rejected(monk
 async def test_provider_completion_after_ownership_loss_is_rejected(monkeypatch):
     started=asyncio.Event(); ownership_checked=asyncio.Event(); ownership_lost=asyncio.Event(); release=asyncio.Event(); owned={"value":True}
     class Provider:
-        async def run(self,*args): started.set(); await release.wait(); return ProviderResult("Gravatar","ok",findings=[{"finding_type":"profile","value":"stale"}])
+        async def run(self,*args): started.set(); await release.wait(); return ProviderResult(self.name,"ok",findings=[{"finding_type":"profile","value":"stale"}])
     install_fake_providers(monkeypatch,Provider); first_check=True
     def ownership_probe(db,inv_id,token):
         nonlocal first_check
@@ -104,7 +104,8 @@ async def test_worker_a_is_fenced_after_worker_b_recovery(monkeypatch,tmp_path):
         inv=add_investigation(db); token_a=lifecycle.claim_investigation(db,inv.id,now=lifecycle.utcnow()); inv_id=inv.id; assert token_a
     started=asyncio.Event(); release=asyncio.Event()
     class Provider:
-        async def run(self,*args): started.set(); await release.wait(); return ProviderResult("Gravatar","ok",findings=[{"finding_type":"profile","value":"stale-a"}])
+        def __init__(self,name): self.name=name
+        async def run(self,*args): started.set(); await release.wait(); return ProviderResult(self.name,"ok",findings=[{"finding_type":"profile","value":"stale-a"}])
     install_fake_providers(monkeypatch,Provider); worker_a=asyncio.create_task(orchestrator.run_providers("test@example.com","example.com",["test"],inv_id=inv_id,token=token_a)); await started.wait()
     with SessionLocal() as db:
         stale=lifecycle.utcnow()-timedelta(seconds=get_settings().execution_lease_seconds+1); db.execute(update(Investigation).where(Investigation.id==inv_id).values(execution_heartbeat_at=stale)); db.commit(); assert lifecycle.recover_stale_investigations(db)==1; token_b=lifecycle.claim_investigation(db,inv_id,now=lifecycle.utcnow()); assert token_b and token_b!=token_a
@@ -120,11 +121,13 @@ async def test_worker_a_is_fenced_after_worker_b_recovery(monkeypatch,tmp_path):
 async def test_timeout_during_ownership_transition_is_not_accepted(monkeypatch):
     started=asyncio.Event(); release=asyncio.Event(); owned={"value":True}
     class TimeoutProvider:
+        def __init__(self,name): self.name=name
         async def run(self,*args): started.set(); await release.wait(); raise httpx.ReadTimeout("provider timeout")
     class SlowProvider:
+        def __init__(self,name): self.name=name
         async def run(self,*args): await asyncio.Event().wait()
-    for name in ("Gravatar","RDAP","GitHub","GitLab","Public Web","Have I Been Pwned"): monkeypatch.setitem(orchestrator.PROVIDER_FACTORY_RESOLVERS,name,(lambda cls=SlowProvider: cls))
-    monkeypatch.setitem(orchestrator.PROVIDER_FACTORY_RESOLVERS,"Gravatar",lambda:TimeoutProvider()); monkeypatch.setattr(orchestrator,"execution_is_owned",lambda db,inv_id,token:owned["value"])
+    for name in ("Gravatar","RDAP","GitHub","GitLab","Public Web","Have I Been Pwned"): monkeypatch.setitem(orchestrator.PROVIDER_FACTORY_RESOLVERS,name,lambda name=name:SlowProvider(name))
+    monkeypatch.setitem(orchestrator.PROVIDER_FACTORY_RESOLVERS,"Gravatar",lambda:TimeoutProvider("Gravatar")); monkeypatch.setattr(orchestrator,"execution_is_owned",lambda db,inv_id,token:owned["value"])
     async def drive_race(): await started.wait(); owned["value"]=False; release.set()
     driver=asyncio.create_task(drive_race())
     try:
@@ -139,7 +142,8 @@ async def test_deletion_during_active_provider_work_cannot_resurrect_data(monkey
         inv=add_investigation(db); inv_id=inv.id; token=lifecycle.claim_investigation(db,inv_id); assert token
     started=asyncio.Event(); release=asyncio.Event()
     class Provider:
-        async def run(self,*args): started.set(); await release.wait(); return ProviderResult("Gravatar","ok",findings=[{"finding_type":"profile","value":"deleted-stale"}])
+        def __init__(self,name): self.name=name
+        async def run(self,*args): started.set(); await release.wait(); return ProviderResult(self.name,"ok",findings=[{"finding_type":"profile","value":"deleted-stale"}])
     install_fake_providers(monkeypatch,Provider); worker=asyncio.create_task(orchestrator.run_providers("test@example.com","example.com",["test"],inv_id=inv_id,token=token)); await started.wait()
     with SessionLocal() as db: assert delete_inv(inv_id,db)["status"]=="deleted"
     release.set()
@@ -152,6 +156,7 @@ async def test_deletion_during_active_provider_work_cannot_resurrect_data(monkey
 async def test_cancellation_exception_cannot_turn_ownership_loss_into_success(monkeypatch):
     started=asyncio.Event(); cleanup_failed=asyncio.Event()
     class Provider:
+        def __init__(self,name): self.name=name
         async def run(self,*args):
             started.set()
             try: await asyncio.Event().wait()
