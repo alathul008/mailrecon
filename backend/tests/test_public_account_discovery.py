@@ -26,7 +26,7 @@ def test_email_normalization_and_username_extraction():
 
 
 def test_default_provider_selection_is_explicit():
-    assert [provider.name for provider in default_providers()] == ["Gravatar", "GitHub", "GitLab", "Have I Been Pwned"]
+    assert [provider.name for provider in default_providers()] == ["Gravatar", "GitHub", "GitLab", "Have I Been Pwned", "Public Web"]
 
 
 def test_provider_success_and_evidence_preservation_are_deterministic():
