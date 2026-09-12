@@ -41,8 +41,8 @@ def utcnow(): return datetime.now(timezone.utc)
 def _require_ownership(db, inv_id, token):
     if not execution_is_owned(db,inv_id,token): raise RuntimeError("Investigation execution lease is no longer owned")
 def _capture_owned_execution(db, inv_id, token): return fence_execution(db,inv_id,token)
-def _persistence_key(f):
-    payload={"source":f.get("source"),"source_url":f.get("source_url"),"finding_type":f.get("finding_type"),"value":f.get("value"),"first_seen":f.get("first_seen").isoformat() if f.get("first_seen") else None}
+def _persistence_key(f, execution_attempt_id):
+    payload={"execution_attempt_id":execution_attempt_id,"source":f.get("source"),"source_url":f.get("source_url"),"finding_type":f.get("finding_type"),"value":f.get("value"),"first_seen":f.get("first_seen").isoformat() if f.get("first_seen") else None}
     return hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()
 
 def set_module(db,inv_id,name,status,message=None,token=None):
@@ -87,11 +87,11 @@ def add_findings(db,inv_id,fs,token=None):
         if inv.privacy_mode:
             f["raw_reference"]=None
             if f.get("finding_type")=="profile_candidate" and f.get("evidence_state")==EVIDENCE_POSSIBLE:continue
-        key=_persistence_key(f)
+        key=_persistence_key(f,execution_attempt_id)
         if key in inserted:continue
-        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==execution_id,Finding.persistence_key==key))
+        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==execution_attempt_id,Finding.persistence_key==key))
         if existing:inserted.add(key);continue
-        legacy=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==execution_id,Finding.persistence_key.is_(None),Finding.source==f.get("source"),Finding.source_url==f.get("source_url"),Finding.finding_type==f.get("finding_type"),Finding.value==f.get("value"),Finding.first_seen==f.get("first_seen")))
+        legacy=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==execution_attempt_id,Finding.persistence_key.is_(None),Finding.source==f.get("source"),Finding.source_url==f.get("source_url"),Finding.finding_type==f.get("finding_type"),Finding.value==f.get("value"),Finding.first_seen==f.get("first_seen")))
         if legacy:inserted.add(key);continue
         db.add(Finding(investigation_id=inv_id,execution_id=execution_id,execution_attempt_id=execution_attempt_id,persistence_key=key,**f));inserted.add(key)
     db.commit()
