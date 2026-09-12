@@ -9,13 +9,13 @@ from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
 from app.osint.dns import resolve, record_presence
-from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, PublicWebProvider, RDAPProvider
+from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, RDAPProvider
 from app.providers.ollama import OllamaProvider
 from app.providers.base import ProviderResult, finding
 from app.risk.engine import calculate
 from app.services.lifecycle import execution_is_owned, fence_execution, heartbeat_investigation, finish_execution_attempt
 
-MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","public_web_discovery","breach_sources","risk_calculation","graph_build"]
+MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","breach_sources","risk_calculation","graph_build"]
 DERIVED_USERNAME_RELATION = "derived_username"
 MODULE_TRANSITIONS = {
     "queued": {"queued", "running", "completed", "skipped", "abandoned"},
@@ -115,8 +115,8 @@ async def _run_provider_call(provider_call):
 async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     if not allow_external:
         message="External provider disclosure disabled for this investigation"
-        return [ProviderResult("Gravatar","disabled",message=message),ProviderResult("RDAP","disabled",message=message),ProviderResult("GitHub","disabled",message=message),ProviderResult("Public Web","disabled",message=message),ProviderResult("Have I Been Pwned","disabled",message=message)]
-    calls=[lambda:GravatarProvider().run(email),lambda:RDAPProvider().run(domain),lambda:GitHubProvider().run(candidates,email),lambda:PublicWebProvider().run(email,candidates),lambda:HIBPProvider().run(email)]
+        return [ProviderResult("Gravatar","disabled",message=message),ProviderResult("RDAP","disabled",message=message),ProviderResult("GitHub","disabled",message=message),ProviderResult("Have I Been Pwned","disabled",message=message)]
+    calls=[lambda:GravatarProvider().run(email),lambda:RDAPProvider().run(domain),lambda:GitHubProvider().run(candidates,email),lambda:HIBPProvider().run(email)]
     tasks=[asyncio.create_task(_run_provider_call(call)) for call in calls]
     if inv_id is None or token is None:return await asyncio.gather(*tasks,return_exceptions=True)
     monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks))
@@ -128,7 +128,8 @@ async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:in
                 exc=monitor.exception()
                 if exc is not None:raise exc
                 break
-            if all(task.done() for task in tasks):break
+            if all(task.done() for task in tasks):
+                break
         gathered=_provider_tasks_outcome(tasks)
         try:
             with SessionLocal() as db:_require_ownership(db,inv_id,token)
@@ -148,20 +149,17 @@ def _finding_evidence_state(row):
     notes=getattr(row,"notes",None) or "";marker="Evidence state: "
     if marker in notes:return notes.split(marker,1)[1].split(".",1)[0].strip()
     return None
-
 def _rdap_domain_consistency(domain,result):
     if isinstance(result,Exception) or getattr(result,"status",None)!="ok":return None
     observed=[f.get("value","").split(": ",1)[1] for f in result.findings if f.get("finding_type")=="domain" and isinstance(f.get("value"),str) and f["value"].startswith("ldhName: ")]
     if not observed:return None
     if observed[0].lower().rstrip(".")==domain.lower().rstrip("."):return finding("MailRecon","domain_correlation","DNS/RDAP domain match",1.0,"info",notes="Explicit comparison of normalized investigation domain with RDAP ldhName.")
     return finding("MailRecon","domain_correlation",f"DNS/RDAP domain mismatch: {observed[0]}",1.0,"warning",notes="RDAP returned a domain different from the normalized investigation domain; this is a consistency warning, not an identity assertion.")
-
 def _graph_relation(finding_type,evidence_state):
     if finding_type=="breach":return "historical_breach_exposure"
     if evidence_state==EVIDENCE_CORROBORATED:return "corroborated_profile"
     if evidence_state==EVIDENCE_SOURCE_ASSOCIATED:return "source_associated_identity"
     return "possible_profile"
-
 async def _heartbeat_loop(inv_id,token,stop_event):
     from app.core.config import get_settings
     interval=max(1.0,min(20.0,get_settings().execution_lease_seconds/3))
@@ -170,7 +168,6 @@ async def _heartbeat_loop(inv_id,token,stop_event):
         except asyncio.TimeoutError:
             with SessionLocal() as db:
                 if not heartbeat_investigation(db,inv_id,token):return
-
 def mark_investigation_failed(db,inv_id,token,exc):
     try:execution_id,execution_attempt_id=fence_execution(db,inv_id,token)
     except RuntimeError:return False
@@ -182,7 +179,6 @@ def mark_investigation_failed(db,inv_id,token,exc):
         if m.status=="running":set_module(db,inv_id,m.module,"failed",f"Investigation failed: {type(exc).__name__}")
         elif m.status=="queued":set_module(db,inv_id,m.module,"skipped","Not executed after investigation failure")
     finish_execution_attempt(db,inv_id,execution_attempt_id,"failed",reason=f"{type(exc).__name__}: investigation execution failed");db.commit();return True
-
 async def run_investigation(inv_id:int,token:str):
     heartbeat_stop=asyncio.Event();heartbeat_task=asyncio.create_task(_heartbeat_loop(inv_id,token,heartbeat_stop))
     with SessionLocal() as db:
@@ -192,13 +188,13 @@ async def run_investigation(inv_id:int,token:str):
             set_module(db,inv_id,"email_validation","running",token=token);analysis=analyze_email(inv.target);execution_id,execution_attempt_id=_capture_owned_execution(db,inv_id,token);inv.normalized_email=analysis["email"];inv.username=analysis["username"];inv.domain=analysis["domain"];db.commit()
             add_findings(db,inv_id,[finding("MailRecon","email",analysis["email"],1.0,"info",notes=f"Normalized and syntax-validated target. Evidence state: {EVIDENCE_OBSERVED}."),finding("MailRecon","classification",f"provider={analysis['provider']}; type={'Disposable' if analysis['disposable'] else 'Role-based' if analysis['role_based'] else 'Personal/Business unknown'}",.95,"info",notes=f"Classification, not an identity verdict. Evidence state: {EVIDENCE_OBSERVED}.")],token);set_module(db,inv_id,"email_validation","completed","Validated and normalized",token)
             set_module(db,inv_id,"username_extraction","running",token=token);candidates=username_candidates(analysis["username"]);add_findings(db,inv_id,[finding("MailRecon","username_candidate",c,0.0,"info",notes=f"Evidence state: {EVIDENCE_DERIVED}. Generated from email local-part; hypothesis only, not proof of account ownership.") for c in candidates],token);set_module(db,inv_id,"username_extraction","completed",f"Generated {len(candidates)} candidates",token)
-            set_module(db,inv_id,"dns_analysis","running",token=token);dns=await resolve(inv.domain);_require_ownership(db,inv_id,token);analysis["has_dmarc"]=record_presence(dns.get("DMARC",[]),dns.get("DMARC_status"));analysis["has_spf"]=record_presence(dns.get("SPF",[]),dns.get("SPF_status"]));analysis["has_spf"]=record_presence(dns.get("SPF",[]),dns.get("SPF_status"));dnssec=dns.get("DNSSEC");analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
+            set_module(db,inv_id,"dns_analysis","running",token=token);dns=await resolve(inv.domain);_require_ownership(db,inv_id,token);analysis["has_dmarc"]=record_presence(dns.get("DMARC",[]),dns.get("DMARC_status"));analysis["has_spf"]=record_presence(dns.get("SPF",[]),dns.get("SPF_status"));dnssec=dns.get("DNSSEC");analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
             fs=[]
             for k in ["A","AAAA","MX","NS","CNAME","SPF","DMARC"]:
                 if dns.get(k):fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),.99,"info",notes=f"Public DNS response. Evidence state: {EVIDENCE_OBSERVED}."))
             dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown";fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure."));add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
-            for n in ["gravatar","rdap","public_profile_discovery","public_web_discovery","breach_sources"]:set_module(db,inv_id,n,"running",token=token)
-            results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure);mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("public_web_discovery",results[3]),("breach_sources",results[4])]
+            for n in ["gravatar","rdap","public_profile_discovery","breach_sources"]:set_module(db,inv_id,n,"running",token=token)
+            results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure);mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("breach_sources",results[3])]
             for name,res in mapping:
                 if isinstance(res,Exception):set_module(db,inv_id,name,"failed",f"Provider exception: {type(res).__name__}",token);add_findings(db,inv_id,[finding(name,"provider_status","error",1.0,"warning",notes=f"Provider raised {type(res).__name__}")],token)
                 else:add_findings(db,inv_id,[provider_finding(res),*res.findings],token);set_module(db,inv_id,name,"completed" if res.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",res.message,token)
@@ -212,8 +208,8 @@ async def run_investigation(inv_id:int,token:str):
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id)).all();seen=set()
             for r in rows:
                 state=_finding_evidence_state(r)
-                if r.finding_type in {"breach","profile_candidate","public_identity","profile","public_web_reference"}:
-                    typ={"breach":"BREACH","profile_candidate":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE","public_web_reference":"PUBLIC_WEB"}[r.finding_type];key=f"{typ.lower()}:{r.value}"
+                if r.finding_type in {"breach","profile_candidate","public_identity","profile"}:
+                    typ={"breach":"BREACH","profile_candidate":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE"}[r.finding_type];key=f"{typ.lower()}:{r.value}"
                     if key in seen:continue
                     seen.add(key);db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence}));db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=_graph_relation(r.finding_type,state),confidence=r.confidence))
             _capture_owned_execution(db,inv_id,token);set_module(db,inv_id,"graph_build","completed","Relationship graph built with evidence-state-aware relationships",token);finish_execution_attempt(db,inv_id,execution_attempt_id,"completed");result=db.execute(update(Investigation).where(Investigation.id==inv_id,Investigation.status=="running",Investigation.execution_token==token).values(status="completed",completed_at=utcnow(),execution_heartbeat_at=None,execution_token=None));db.commit()
