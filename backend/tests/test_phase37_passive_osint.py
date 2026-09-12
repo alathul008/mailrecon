@@ -1,5 +1,4 @@
 import asyncio
-import json
 from datetime import datetime, timezone
 
 import httpx
@@ -95,6 +94,7 @@ def test_rdap_enrichment_does_not_persist_raw_payload(monkeypatch):
         async def get(self, url): return httpx.Response(200, json=payload)
 
     monkeypatch.setattr("app.providers.rdap.httpx.AsyncClient", lambda **kwargs: FakeClient())
+    monkeypatch.setattr("app.providers.rdap.validate_provider_url", lambda url: None)
     result = asyncio.run(RDAPProvider().run(type("Context", (), {"domain": "example.com"})()))
     values = {(f["finding_type"], f["value"]) for f in result.findings}
     assert ("registrar", "Example Registrar") in values
@@ -119,6 +119,7 @@ def test_public_web_normalization_is_deterministic_and_bounded(monkeypatch):
     settings.public_web_search_url = "https://search.example.test/search"
     settings.public_web_search_token = None
     monkeypatch.setattr("app.providers.public_web.httpx.AsyncClient", lambda **kwargs: FakeClient())
+    monkeypatch.setattr("app.providers.public_web.validate_provider_url", lambda url: None)
     try:
         context = type("Context", (), {"email": "alice@example.com", "candidates": ("alice", "alice_example", "alice-example", "alice")})()
         result = asyncio.run(PublicWebProvider().run(context))
@@ -150,7 +151,11 @@ def test_durable_execution_path_preserves_attempt_and_operational_failure(monkey
         "DMARC": [], "DMARC_status": "no_result", "DMARC_analysis": {"present": False, "policy": None, "pct": None, "alignment_dkim": None, "alignment_spf": None, "reporting_uris": False},
         "DKIM": [], "DKIM_status": "no_result", "DKIM_analysis": [], "DS": [], "DNSSEC": False, "DNSSEC_status": "no_result", "IP_CONTEXT": [], "MX_PROVIDER": None, "NS_PROVIDER": None,
     }
-    monkeypatch.setattr(orchestrator, "resolve", lambda domain: fake_dns)
+
+    async def fake_resolve(domain):
+        return fake_dns
+
+    monkeypatch.setattr(orchestrator, "resolve", fake_resolve)
 
     async def fake_run_providers(*args, **kwargs):
         return [ProviderResult("Gravatar", "rate_limited", message="rate limit"), ProviderResult("RDAP", "ok"), ProviderResult("GitHub", "ok"), ProviderResult("GitLab", "ok"), ProviderResult("Have I Been Pwned", "unconfigured"), ProviderResult("Public Web", "unconfigured")]
