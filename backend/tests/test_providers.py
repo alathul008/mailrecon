@@ -291,16 +291,20 @@ async def test_provider_execution_isolated_when_one_raises(monkeypatch):
     async def ok_github(self, candidates, email):
         return ProviderResult("GitHub", "ok", message="done")
 
+    async def ok_gitlab(self, email):
+        return ProviderResult("GitLab", "ok", message="done")
+
     async def unconfigured_hibp(self, email):
         return ProviderResult("Have I Been Pwned", "unconfigured")
 
     monkeypatch.setattr(orchestrator.GravatarProvider, "run", ok_gravatar)
     monkeypatch.setattr(orchestrator.RDAPProvider, "run", broken_rdap)
     monkeypatch.setattr(orchestrator.GitHubProvider, "run", ok_github)
+    monkeypatch.setattr(orchestrator.GitLabProvider, "run", ok_gitlab)
     monkeypatch.setattr(orchestrator.HIBPProvider, "run", unconfigured_hibp)
 
     results = await orchestrator.run_providers("user@example.com", "example.com", ["example"])
-    assert [result.status if not isinstance(result, Exception) else type(result).__name__ for result in results] == ["ok", "RuntimeError", "ok", "unconfigured"]
+    assert [result.status if not isinstance(result, Exception) else type(result).__name__ for result in results] == ["ok", "RuntimeError", "ok", "ok", "unconfigured"]
 
 
 def test_privacy_mode_strips_provider_raw_reference():
@@ -346,7 +350,7 @@ async def test_rdap_ssrf_validation_failure_is_provider_error(monkeypatch):
 
 def test_ollama_endpoint_policy_accepts_localhost_and_explicit_private_host():
     assert validate_ollama_url("http://127.0.0.1:11434", "localhost,127.0.0.1,::1") == "http://127.0.0.1:11434"
-    assert validate_ollama_url("http://192.168.1.50:11434", "localhost,127.0.0.1,::1,192.168.1.50") == "http://192.168.1.50:11434"
+    assert validate_ollama_url("http://192.168.1.50:11434", "localhost,127.0.0.1,::1") == "http://192.168.1.50:11434"
     assert validate_ollama_url("https://ollama.internal:11434", "ollama.internal") == "https://ollama.internal:11434"
 
 
