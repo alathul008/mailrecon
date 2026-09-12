@@ -51,8 +51,6 @@ def _structured_evidence_state(f):
     if isinstance(state,str) and state:return state
     raw=f.get("raw_reference")
     if isinstance(raw,dict) and isinstance(raw.get("evidence_state"),str):return raw["evidence_state"]
-    # Legacy provider payloads may still omit the structured field. Notes are
-    # retained as a last-resort compatibility path only.
     notes=f.get("notes") or "";marker="Evidence state: "
     if marker in notes:return notes.split(marker,1)[1].split(".",1)[0].strip() or None
     return None
@@ -207,10 +205,10 @@ async def run_investigation(inv_id:int,token:str):
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_id==inv.execution_id)).all();seen=set()
             for r in rows:
                 state=_finding_evidence_state(r)
-                if r.finding_type in {"breach","profile_candidate","public_identity","profile"}:
-                    typ={"breach":"BREACH","profile_candidate":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE"}[r.finding_type];key=f"{typ.lower()}:{r.value}"
+                if r.finding_type in {"breach","profile_candidate","public_identity","profile","public_web_reference"}:
+                    typ={"breach":"BREACH","profile_candidate":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE","public_web_reference":"WEB_REFERENCE"}[r.finding_type];key=f"{typ.lower()}:{r.value}"
                     if key in seen:continue
-                    seen.add(key);db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence}));db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=_graph_relation(r.finding_type,state),confidence=r.confidence))
+                    seen.add(key);db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence,"source_url":r.source_url}));db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=_graph_relation(r.finding_type,state),confidence=r.confidence))
             _capture_owned_execution(db,inv_id,token);set_module(db,inv_id,"graph_build","completed","Relationship graph built with evidence-state-aware relationships",token);finish_execution_attempt(db,inv_id,execution_attempt_id,"completed");result=db.execute(update(Investigation).where(Investigation.id==inv_id,Investigation.status=="running",Investigation.execution_token==token).values(status="completed",completed_at=utcnow(),execution_heartbeat_at=None,execution_token=None));db.commit()
             if result.rowcount!=1:return
         except Exception as exc:
