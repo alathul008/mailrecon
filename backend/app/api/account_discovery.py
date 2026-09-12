@@ -24,6 +24,9 @@ def _finding_dict(f: Finding) -> dict:
         "value": f.value,
         "confidence": f.confidence,
         "evidence_state": evidence_state,
+        "notes": f.notes,
+        "collected_at": f.collected_at,
+        "raw_reference": f.raw_reference,
     }
 
 
@@ -54,11 +57,25 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
     rows = build_account_discovery_matrix([_finding_dict(f) for f in findings])
     return {
         "investigation_id": inv_id,
-        "target": inv.normalized_email or inv.target,
+        "target": inv.target,
+        "normalized_email": inv.normalized_email,
+        "username": inv.username,
+        "domain": inv.domain,
+        "provider_execution_status": [
+            {
+                "provider": f.source,
+                "status": f.value,
+                "checked_at": f.collected_at,
+                "message": f.notes,
+            }
+            for f in findings
+            if f.finding_type == "provider_status"
+        ],
         "semantics": {
-            "status": "operational_or_evidence_state",
+            "status": "operational_status_and_evidence_state_are_separate",
             "identity": "correlation_does_not_confirm_identity",
             "negative_results": "no_public_evidence_is_not_account_nonexistence",
+            "unsupported": "unsupported_services_are_not_checked_and_are_not_negative_findings",
         },
         "services": rows,
     }
