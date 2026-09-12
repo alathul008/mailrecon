@@ -32,9 +32,12 @@ def install_fake_providers(monkeypatch, factory):
         try:
             import inspect
             inspect.signature(factory).bind(name)
+            provider = factory(name)
         except TypeError:
-            return factory()
-        return factory(name)
+            provider = factory()
+        if not hasattr(provider, "name"):
+            provider.name = name
+        return provider
     for definition in provider_definitions(orchestrated=True):
         if definition.factory:
             monkeypatch.setitem(orchestrator.PROVIDER_FACTORY_RESOLVERS, definition.name, lambda definition=definition: make(definition.name))
@@ -44,7 +47,6 @@ def install_fake_providers(monkeypatch, factory):
 async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
     names=tuple(item.name for item in provider_definitions(orchestrated=True) if item.factory); started={name:asyncio.Event() for name in names}; cancelled={name:asyncio.Event() for name in names}; provider_tasks=[]
     class Provider:
-        def __init__(self,name): self.name=name
         async def run(self,*args):
             started[self.name].set()
             try: await asyncio.Event().wait()
@@ -156,7 +158,6 @@ async def test_deletion_during_active_provider_work_cannot_resurrect_data(monkey
 async def test_cancellation_exception_cannot_turn_ownership_loss_into_success(monkeypatch):
     started=asyncio.Event(); cleanup_failed=asyncio.Event()
     class Provider:
-        def __init__(self,name): self.name=name
         async def run(self,*args):
             started.set()
             try: await asyncio.Event().wait()
