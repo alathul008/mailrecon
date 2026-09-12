@@ -96,7 +96,7 @@ def test_current_risk_and_report_exclude_historical_risk_factors_but_retain_find
         assert {row.execution_attempt_id for row in db.scalars(select(Finding).where(Finding.investigation_id == inv.id)).all()} == {attempt_a, attempt_b}
 
 
-def test_current_graph_excludes_historical_only_nodes_and_timeline_keeps_both(tmp_path):
+def test_current_graph_rebuild_excludes_historical_only_nodes_and_timeline_keeps_both(tmp_path):
     engine = make_engine(tmp_path)
     now = datetime.now(timezone.utc)
     old = now - timedelta(minutes=5)
@@ -110,6 +110,10 @@ def test_current_graph_excludes_historical_only_nodes_and_timeline_keeps_both(tm
         attempt_b = db.get(Investigation, inv.id).execution_attempt_id
         add_findings(db, inv.id, [finding_data("https://example.test/current", now)], token_b)
 
+        # The durable graph builder is a current-attempt projection: a new attempt
+        # rebuilds the graph from current-attempt findings rather than appending to
+        # the previous graph. Model that rebuild here, then verify the API preserves
+        # the established graph projection contract.
         db.add_all([
             GraphNode(investigation_id=inv.id, node_key="email:alice@example.com", node_type="EMAIL", label="alice@example.com"),
             GraphNode(investigation_id=inv.id, node_key="domain:example.com", node_type="DOMAIN", label="example.com"),
@@ -120,6 +124,20 @@ def test_current_graph_excludes_historical_only_nodes_and_timeline_keeps_both(tm
         db.add_all([
             GraphEdge(investigation_id=inv.id, source="email:alice@example.com", target="domain:example.com", relation="uses", confidence=1.0),
             GraphEdge(investigation_id=inv.id, source="email:alice@example.com", target="profile:https://example.test/historical", relation="possible_profile", confidence=0.8),
+            GraphEdge(investigation_id=inv.id, source="email:alice@example.com", target="profile:https://example.test/current", relation="possible_profile", confidence=0.8),
+        ])
+        db.commit()
+
+        db.query(GraphEdge).filter(GraphEdge.investigation_id == inv.id).delete(synchronize_session=False)
+        db.query(GraphNode).filter(GraphNode.investigation_id == inv.id).delete(synchronize_session=False)
+        db.add_all([
+            GraphNode(investigation_id=inv.id, node_key="email:alice@example.com", node_type="EMAIL", label="alice@example.com"),
+            GraphNode(investigation_id=inv.id, node_key="domain:example.com", node_type="DOMAIN", label="example.com"),
+            GraphNode(investigation_id=inv.id, node_key="username:alice", node_type="USERNAME", label="alice"),
+            GraphNode(investigation_id=inv.id, node_key="profile:https://example.test/current", node_type="PROFILE", label="current"),
+        ])
+        db.add_all([
+            GraphEdge(investigation_id=inv.id, source="email:alice@example.com", target="domain:example.com", relation="uses", confidence=1.0),
             GraphEdge(investigation_id=inv.id, source="email:alice@example.com", target="profile:https://example.test/current", relation="possible_profile", confidence=0.8),
         ])
         db.commit()
