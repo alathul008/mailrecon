@@ -92,10 +92,11 @@ def get_inv(inv_id:int,db:Session=Depends(get_db)):
 def findings(inv_id:int,db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); return [finding_projection(f,inv.execution_attempt_id) for f in fs]
 
-@router.get("/investigations/{inv_id}/risk", dependencies=[Depends(require_api_key)])
 def risk(inv_id:int,db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); dimensions={}; factors=[]
-    for f in fs:
+    current_attempt_id=inv.execution_attempt_id
+    current_fs=[f for f in fs if current_attempt_id and f.execution_attempt_id==current_attempt_id]
+    for f in current_fs:
         if f.finding_type == "risk_dimension" and "=" in f.value:
             key,value=f.value.split("=",1)
             try: dimensions[key]=int(value)
@@ -107,6 +108,9 @@ def risk(inv_id:int,db:Session=Depends(get_db)):
                 except ValueError: pass
             factors.append({"reason":f.value,"delta":delta,"notes":f.notes})
     return {"score":inv.risk_score,"level":inv.risk_level,"dimensions":dimensions,"factors":factors}
+
+@router.get("/investigations/{inv_id}/risk", dependencies=[Depends(require_api_key)])
+def risk_endpoint(inv_id:int,db:Session=Depends(get_db)): return risk(inv_id,db)
 
 @router.get("/investigations/{inv_id}/timeline", dependencies=[Depends(require_api_key)])
 def timeline(inv_id:int,db:Session=Depends(get_db)):
@@ -120,11 +124,21 @@ def timeline(inv_id:int,db:Session=Depends(get_db)):
 
 @router.get("/investigations/{inv_id}/graph", dependencies=[Depends(require_api_key)])
 def graph(inv_id:int,db:Session=Depends(get_db)):
-    inv,_,_=load(inv_id,db); nodes=list(db.scalars(select(GraphNode).where(GraphNode.investigation_id==inv_id).order_by(GraphNode.node_key.asc(),GraphNode.id.asc())).all()); edges=list(db.scalars(select(GraphEdge).where(GraphEdge.investigation_id==inv_id).order_by(GraphEdge.source.asc(),GraphEdge.target.asc(),GraphEdge.relation.asc(),GraphEdge.id.asc())).all()); return {"semantics":"current_derived_view","provenance":{"type":"producing_execution_attempt","execution_id":inv.execution_id,"execution_attempt_id":inv.execution_attempt_id,"attempt_status":attempt_status(db,inv).status if attempt_status(db,inv) else None},"nodes":[{"id":n.node_key,"type":n.node_type,"label":n.label,"metadata":n.node_metadata} for n in nodes],"edges":[{"source":e.source,"target":e.target,"relation":e.relation,"confidence":e.confidence} for e in edges]}
+    inv,_,_=load(inv_id,db)
+    nodes=list(db.scalars(select(GraphNode).where(GraphNode.investigation_id==inv_id).order_by(GraphNode.node_key.asc(),GraphNode.id.asc())).all())
+    edges=list(db.scalars(select(GraphEdge).where(GraphEdge.investigation_id==inv_id).order_by(GraphEdge.source.asc(),GraphEdge.target.asc(),GraphEdge.relation.asc(),GraphEdge.id.asc())).all())
+    attempt=attempt_status(db,inv)
+    return {"semantics":"current_derived_view","provenance":{"type":"producing_execution_attempt","execution_id":inv.execution_id,"execution_attempt_id":inv.execution_attempt_id,"attempt_status":attempt.status if attempt else None},"nodes":[{"id":n.node_key,"type":n.node_type,"label":n.label,"metadata":n.node_metadata} for n in nodes],"edges":[{"source":e.source,"target":e.target,"relation":e.relation,"confidence":e.confidence} for e in edges]}
 
 @router.get("/investigations/{inv_id}/report", dependencies=[Depends(require_api_key)])
 def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
-    inv,fs,_=load(inv_id,db); generated_at=datetime.now(timezone.utc); provenance=report_provenance(db,inv,generated_at); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor")); factors=[{"delta":int((f.notes or "").replace("Score delta: ","").strip() or 0),"reason":f.value} for f in fq.scalars()]
+    inv,fs,_=load(inv_id,db); generated_at=datetime.now(timezone.utc); provenance=report_provenance(db,inv,generated_at); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor",Finding.execution_attempt_id==inv.execution_attempt_id)); factors=[]
+    for f in fq.scalars():
+        delta=0
+        if f.notes and "Score delta:" in f.notes:
+            try: delta=int(f.notes.split("Score delta:",1)[1].split(";",1)[0].strip())
+            except ValueError: delta=0
+        factors.append({"delta":delta,"reason":f.value})
     if format=="json": return {"provenance":provenance,"target":inv.target,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"findings":[{**finding_projection(f,inv.execution_attempt_id)} for f in fs],"risk_factors":factors}
     if format=="csv":
         s=io.StringIO(); w=csv.writer(s); w.writerow(["report_generated_at","investigation_id","execution_id","execution_attempt_id","attempt_status","attempt_started_at","attempt_finished_at","recovered_at","recovery_reason","external_provider_disclosure","privacy_mode","source","type","value","confidence","evidence_state","severity","current_attempt","historical_attempt","source_url","notes"])
