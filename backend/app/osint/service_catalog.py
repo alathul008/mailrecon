@@ -28,6 +28,7 @@ SERVICE_CATALOG: tuple[ServiceDefinition, ...] = (
     ServiceDefinition("Twitch", "Gaming", ("public_profile_page",), False),
     ServiceDefinition("Gravatar", "Avatar", ("public_hash_lookup",), True, "Gravatar"),
     ServiceDefinition("Have I Been Pwned", "Other", ("breach_metadata_api",), True, "Have I Been Pwned"),
+    ServiceDefinition("Public Web", "Other", ("public_search_api",), True, "Public Web"),
 )
 
 
@@ -56,7 +57,7 @@ def _service_status(defn: ServiceDefinition, findings: list[dict[str, Any]]) -> 
     matches = [
         f for f in findings
         if f.get("source") == defn.provider
-        and f.get("finding_type") in {"profile_candidate", "public_identity", "profile"}
+        and f.get("finding_type") in {"profile_candidate", "public_identity", "profile", "public_web_reference"}
     ]
     if matches:
         if any(f.get("evidence_state") == "corroborated_match" for f in matches):
@@ -78,13 +79,10 @@ def build_account_discovery_matrix(findings: list[dict[str, Any]]) -> list[dict[
     """
     matrix: list[dict[str, Any]] = []
     for definition in SERVICE_CATALOG:
-        service_findings = [
-            f for f in findings
-            if f.get("source") == definition.provider
-        ]
+        service_findings = [f for f in findings if f.get("source") == definition.provider]
         matches = [
             f for f in service_findings
-            if f.get("finding_type") in {"profile_candidate", "public_identity", "profile"}
+            if f.get("finding_type") in {"profile_candidate", "public_identity", "profile", "public_web_reference"}
         ]
         status = _service_status(definition, findings)
         matrix.append({
