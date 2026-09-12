@@ -8,6 +8,7 @@ from app.api.routes import router
 from app.api.correlations import router as correlation_router
 from app.api.account_discovery import router as account_discovery_router
 from app.api.public_web import router as public_web_router
+from app.api.execution import router as execution_router
 from app.services.lifecycle import worker_loop
 from app.services.schema import ensure_schema
 import asyncio
@@ -36,6 +37,7 @@ app.include_router(router)
 app.include_router(correlation_router)
 app.include_router(account_discovery_router)
 app.include_router(public_web_router)
+app.include_router(execution_router)
 if os.path.isdir("/app/frontend/dist"):
     app.mount("/",StaticFiles(directory="/app/frontend/dist",html=True),name="frontend")
 

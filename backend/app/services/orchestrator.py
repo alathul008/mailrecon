@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select, update, or_
@@ -20,14 +21,13 @@ from app.providers.rdap import RDAPProvider
 from app.providers.registry import execute, provider_definitions
 from app.risk.engine import calculate
 from app.services.lifecycle import execution_is_owned, fence_execution, heartbeat_investigation, finish_execution_attempt
+from app.services.resource_budget import ExecutionResourceBudget
 
+logger = logging.getLogger("mailrecon.execution")
 PROVIDER_DEFINITIONS = provider_definitions(orchestrated=True)
 MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","gitlab","public_web","breach_sources","risk_calculation","graph_build"]
 DERIVED_USERNAME_RELATION = "derived_username"
 MODULE_TRANSITIONS = {"queued": {"queued", "running", "completed", "skipped", "abandoned"}, "running": {"running", "completed", "failed", "skipped", "abandoned"}, "completed": {"completed"}, "failed": {"failed"}, "skipped": {"skipped"}, "abandoned": {"abandoned"}}
-
-# Explicit construction hooks keep existing monkeypatch-based tests possible without
-# resolving provider classes through dynamic global symbol lookup.
 PROVIDER_FACTORY_RESOLVERS = {
     "Gravatar": lambda: GravatarProvider(),
     "RDAP": lambda: RDAPProvider(),
@@ -119,17 +119,36 @@ async def _provider_tasks_owned(inv_id,token,tasks,*,poll_interval=0.25):
 def _provider_tasks_outcome(tasks):
     return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
 
-async def _run_provider_call(definition,email,domain,candidates):
-    context=ProviderContext(email=email,domain=domain,candidates=tuple(candidates))
-    factory=PROVIDER_FACTORY_RESOLVERS.get(definition.name)
-    return await execute(definition,context=context,factory=factory)
+async def _run_provider_call(definition,email,domain,candidates,*,investigation_id=None,execution_attempt_id=None):
+    started_at=utcnow()
+    provider=definition.name
+    module=definition.module or provider.lower().replace(" ","_")
+    try:
+        context=ProviderContext(email=email,domain=domain,candidates=tuple(candidates))
+        factory=PROVIDER_FACTORY_RESOLVERS.get(definition.name)
+        result=await execute(definition,context=context,factory=factory)
+        logger.info("provider_execution",extra={"investigation_id":investigation_id,"execution_attempt_id":execution_attempt_id,"module":module,"provider":provider,"started_at":started_at.isoformat(),"finished_at":utcnow().isoformat(),"duration_ms":int((utcnow()-started_at).total_seconds()*1000),"operational_status":result.status,"error_class":None})
+        return result
+    except Exception as exc:
+        finished_at=utcnow()
+        logger.warning("provider_execution_failed",extra={"investigation_id":investigation_id,"execution_attempt_id":execution_attempt_id,"module":module,"provider":provider,"started_at":started_at.isoformat(),"finished_at":finished_at.isoformat(),"duration_ms":int((finished_at-started_at).total_seconds()*1000),"operational_status":"error","error_class":type(exc).__name__})
+        raise
+
+def _estimated_external_requests(provider_count,candidate_count):
+    return provider_count * (1 + candidate_count)
 
 async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     definitions=tuple(item for item in PROVIDER_DEFINITIONS if item.factory is not None)
+    budget=ExecutionResourceBudget()
+    budget.validate(provider_calls=len(definitions),candidate_probes=len(candidates),estimated_external_requests=_estimated_external_requests(len(definitions),len(candidates)))
     if not allow_external:
         message="External provider disclosure disabled for this investigation"
         return [ProviderResult(definition.name,"disabled",message=message) for definition in definitions]
-    tasks=[asyncio.create_task(_run_provider_call(definition,email,domain,candidates)) for definition in definitions]
+    execution_attempt_id=None
+    if inv_id is not None:
+        with SessionLocal() as db:
+            execution_attempt_id=db.scalar(select(Investigation.execution_attempt_id).where(Investigation.id==inv_id))
+    tasks=[asyncio.create_task(_run_provider_call(definition,email,domain,candidates,investigation_id=inv_id,execution_attempt_id=execution_attempt_id)) for definition in definitions]
     if inv_id is None or token is None:return await asyncio.gather(*tasks,return_exceptions=True)
     monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks));gathered=None
     try:
