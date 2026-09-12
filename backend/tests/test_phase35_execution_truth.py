@@ -1,15 +1,18 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.db.session import Base
 from app.models import ExecutionAttempt, Finding, Investigation, ModuleRun
 from app.osint.correlation import correlate_email_findings
+from app.providers.base import ProviderResult, ProviderContext
 from app.services import lifecycle
 from app.services.execution_outcome import aggregate_execution_outcome
 from app.services.resource_budget import ExecutionResourceBudget
+from app.api import public_web
 
 
 def make_engine(tmp_path):
@@ -44,18 +47,67 @@ def add_finding(db, inv, attempt, value, finding_type="profile_candidate", colle
     db.commit()
 
 
+@pytest.mark.asyncio
+async def test_public_web_preview_uses_canonical_provider_context(monkeypatch):
+    seen = {}
+
+    class FakeProvider:
+        async def run(self, context: ProviderContext):
+            seen["context"] = context
+            return ProviderResult("Public Web", "ok", findings=[])
+
+    monkeypatch.setattr(public_web, "PublicWebProvider", FakeProvider)
+    result = await public_web.public_web_discovery("Alice.Example@example.com", "analyst,alice-example")
+    assert result["status"] == "ok"
+    assert isinstance(seen["context"], ProviderContext)
+    assert seen["context"].email == "Alice.Example@example.com"
+    assert seen["context"].domain == "example.com"
+    assert "analyst" in seen["context"].candidates
+    assert result["semantics"]["contract"] == "canonical ProviderContext and ProviderResult"
+
+
+@pytest.mark.asyncio
+async def test_public_web_preview_rejects_invalid_email(monkeypatch):
+    with pytest.raises(HTTPException) as exc:
+        await public_web.public_web_discovery("not-an-email", "")
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_public_web_preview_preserves_operational_status(monkeypatch):
+    class FakeProvider:
+        async def run(self, context: ProviderContext):
+            return ProviderResult("Public Web", "rate_limited", message="provider limit")
+
+    monkeypatch.setattr(public_web, "PublicWebProvider", FakeProvider)
+    result = await public_web.public_web_discovery("alice@example.com", "")
+    assert result["status"] == "rate_limited"
+    assert result["findings"] == []
+
+
+@pytest.mark.asyncio
+async def test_public_web_preview_rejects_malformed_provider_result(monkeypatch):
+    class FakeProvider:
+        async def run(self, context: ProviderContext):
+            return {"provider": "Public Web", "status": "ok"}
+
+    monkeypatch.setattr(public_web, "PublicWebProvider", FakeProvider)
+    with pytest.raises(TypeError):
+        await public_web.public_web_discovery("alice@example.com", "")
+
+
 def test_current_correlation_excludes_historical_attempt(tmp_path):
     engine = make_engine(tmp_path)
     now = datetime.now(timezone.utc)
     with Session(engine) as db:
         inv = add_investigation(db)
-        token_a = lifecycle.claim_investigation(db, inv.id, now=now - timedelta(minutes=5))
+        lifecycle.claim_investigation(db, inv.id, now=now - timedelta(minutes=5))
         attempt_a = db.get(Investigation, inv.id).execution_attempt_id
         add_finding(db, inv, attempt_a, "historical")
         db.get(Investigation, inv.id).execution_heartbeat_at = now - timedelta(minutes=5)
         db.commit()
         assert lifecycle.recover_stale_investigations(db, now=now) == 1
-        token_b = lifecycle.claim_investigation(db, inv.id, now=now)
+        lifecycle.claim_investigation(db, inv.id, now=now)
         current = db.get(Investigation, inv.id)
         attempt_b = current.execution_attempt_id
         add_finding(db, current, attempt_b, "current")
@@ -78,7 +130,7 @@ def test_abandoned_attempt_cannot_be_current_correlation(tmp_path):
     now = datetime.now(timezone.utc)
     with Session(engine) as db:
         inv = add_investigation(db)
-        token_a = lifecycle.claim_investigation(db, inv.id, now=now - timedelta(minutes=5))
+        lifecycle.claim_investigation(db, inv.id, now=now - timedelta(minutes=5))
         attempt_a = db.get(Investigation, inv.id).execution_attempt_id
         add_finding(db, inv, attempt_a, "abandoned")
         db.get(Investigation, inv.id).execution_heartbeat_at = now - timedelta(minutes=5)
@@ -94,10 +146,13 @@ def test_aggregate_outcome_distinguishes_success_partial_and_failure(tmp_path):
     engine = make_engine(tmp_path)
     with Session(engine) as db:
         inv = add_investigation(db)
-        token = lifecycle.claim_investigation(db, inv.id)
+        lifecycle.claim_investigation(db, inv.id)
         current = db.get(Investigation, inv.id)
         attempt = db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.execution_attempt_id == current.execution_attempt_id))
-        modules = [ModuleRun(investigation_id=inv.id, execution_id=current.execution_id, execution_attempt_id=current.execution_attempt_id, module="github", status="completed"), ModuleRun(investigation_id=inv.id, execution_id=current.execution_id, execution_attempt_id=current.execution_attempt_id, module="gitlab", status="completed")]
+        modules = [
+            ModuleRun(investigation_id=inv.id, execution_id=current.execution_id, execution_attempt_id=current.execution_attempt_id, module="github", status="completed"),
+            ModuleRun(investigation_id=inv.id, execution_id=current.execution_id, execution_attempt_id=current.execution_attempt_id, module="gitlab", status="completed"),
+        ]
         db.add_all(modules); db.commit()
         attempt.status = "completed"; current.status = "completed"; db.commit()
         assert aggregate_execution_outcome(current, attempt, modules, ["ok", "ok"]) == "completed"
