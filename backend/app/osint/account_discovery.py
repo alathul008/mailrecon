@@ -6,10 +6,11 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from app.osint.email import analyze_email, username_candidates
-from app.providers.base import ProviderResult
+from app.providers.base import ProviderContext, ProviderResult
 from app.providers.registry import ProviderDefinition, execute, provider_definitions
 
 PROVIDER_STATUS_LABELS = {"ok": "OK", "unconfigured": "UNCONFIGURED", "rate_limited": "RATE LIMITED", "unavailable": "UNAVAILABLE", "error": "ERROR", "disabled": "DISABLED"}
+
 
 @dataclass(frozen=True)
 class DiscoveryTarget:
@@ -17,27 +18,33 @@ class DiscoveryTarget:
     username: str
     domain: str
 
+
 class AccountProvider(Protocol):
     name: str
-    async def run(self, email: str, candidates: list[str]) -> ProviderResult: ...
+    async def run(self, context: ProviderContext) -> ProviderResult: ...
+
 
 class _RegistryAdapter:
     def __init__(self, definition: ProviderDefinition):
         self.definition = definition
         self.name = definition.name
 
-    async def run(self, email: str, candidates: list[str]) -> ProviderResult:
-        return await execute(self.definition, email=email, domain=analyze_email(email)["domain"], candidates=candidates)
+    async def run(self, context: ProviderContext) -> ProviderResult:
+        return await execute(self.definition, context=context)
+
 
 def normalize_target(email: str) -> DiscoveryTarget:
     analysis = analyze_email(email.strip())
     return DiscoveryTarget(email=analysis["email"], username=analysis["username"], domain=analysis["domain"])
 
+
 def default_providers() -> tuple[AccountProvider, ...]:
     return tuple(_RegistryAdapter(definition) for definition in provider_definitions(account_discovery=True))
 
+
 def _provider_status_result(provider: AccountProvider, status: str, message: str | None, checked_at: datetime) -> dict[str, Any]:
     return {"provider": provider.name, "status": PROVIDER_STATUS_LABELS.get(status, status.upper()), "status_code": status, "checked_at": checked_at, "message": message}
+
 
 async def discover_public_accounts(email: str, *, providers: tuple[AccountProvider, ...] | None = None, allow_external: bool = True) -> dict[str, Any]:
     target = normalize_target(email)
@@ -46,10 +53,11 @@ async def discover_public_accounts(email: str, *, providers: tuple[AccountProvid
     if not allow_external:
         return {"target": target, "providers": [_provider_status_result(p, "disabled", "External provider disclosure disabled", checked_at) for p in selected], "findings": []}
     candidates = username_candidates(target.username)
+    context = ProviderContext(email=target.email, domain=target.domain, candidates=tuple(candidates))
 
     async def run(provider: AccountProvider) -> tuple[AccountProvider, ProviderResult | Exception]:
         try:
-            return provider, await provider.run(target.email, candidates)
+            return provider, await provider.run(context)
         except Exception as exc:
             return provider, exc
 
@@ -64,11 +72,14 @@ async def discover_public_accounts(email: str, *, providers: tuple[AccountProvid
         findings.extend(result.findings)
     return {"target": target, "providers": statuses, "findings": _dedupe_findings(findings)}
 
+
 def _dedupe_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[Any, ...]] = set()
     output: list[dict[str, Any]] = []
     for item in findings:
         key = (item.get("source"), item.get("finding_type"), item.get("value"), item.get("source_url"))
-        if key in seen: continue
-        seen.add(key); output.append(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(item)
     return output
