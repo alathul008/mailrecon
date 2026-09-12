@@ -92,7 +92,6 @@ def get_inv(inv_id:int,db:Session=Depends(get_db)):
 def findings(inv_id:int,db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); return [finding_projection(f,inv.execution_attempt_id) for f in fs]
 
-@router.get("/investigations/{inv_id}/risk", dependencies=[Depends(require_api_key)])
 def risk(inv_id:int,db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); dimensions={}; factors=[]
     current_attempt_id=inv.execution_attempt_id
@@ -110,6 +109,9 @@ def risk(inv_id:int,db:Session=Depends(get_db)):
             factors.append({"reason":f.value,"delta":delta,"notes":f.notes})
     return {"score":inv.risk_score,"level":inv.risk_level,"dimensions":dimensions,"factors":factors}
 
+@router.get("/investigations/{inv_id}/risk", dependencies=[Depends(require_api_key)])
+def risk_endpoint(inv_id:int,db:Session=Depends(get_db)): return risk(inv_id,db)
+
 @router.get("/investigations/{inv_id}/timeline", dependencies=[Depends(require_api_key)])
 def timeline(inv_id:int,db:Session=Depends(get_db)):
     inv,fs,_=load(inv_id,db); events=[]; seen=set()
@@ -125,13 +127,6 @@ def graph(inv_id:int,db:Session=Depends(get_db)):
     inv,_,_=load(inv_id,db)
     nodes=list(db.scalars(select(GraphNode).where(GraphNode.investigation_id==inv_id).order_by(GraphNode.node_key.asc(),GraphNode.id.asc())).all())
     edges=list(db.scalars(select(GraphEdge).where(GraphEdge.investigation_id==inv_id).order_by(GraphEdge.source.asc(),GraphEdge.target.asc(),GraphEdge.relation.asc(),GraphEdge.id.asc())).all())
-    current_findings=list(db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==inv.execution_attempt_id)).all()) if inv.execution_attempt_id else []
-    base_keys={f"email:{inv.normalized_email or inv.target}",f"domain:{inv.domain}",f"username:{inv.username}"}
-    type_map={"breach":"breach","profile_candidate":"profile","public_identity":"identity","profile":"profile","public_web_reference":"web_reference"}
-    current_keys={f"{type_map[item.finding_type]}:{item.value}" for item in current_findings if item.finding_type in type_map}
-    allowed_keys=base_keys|current_keys
-    nodes=[n for n in nodes if n.node_key in allowed_keys]
-    edges=[e for e in edges if e.source in allowed_keys and e.target in allowed_keys]
     attempt=attempt_status(db,inv)
     return {"semantics":"current_derived_view","provenance":{"type":"producing_execution_attempt","execution_id":inv.execution_id,"execution_attempt_id":inv.execution_attempt_id,"attempt_status":attempt.status if attempt else None},"nodes":[{"id":n.node_key,"type":n.node_type,"label":n.label,"metadata":n.node_metadata} for n in nodes],"edges":[{"source":e.source,"target":e.target,"relation":e.relation,"confidence":e.confidence} for e in edges]}
 
