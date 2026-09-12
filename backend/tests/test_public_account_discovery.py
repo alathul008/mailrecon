@@ -1,9 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 
-import pytest
-
-from app.osint.account_discovery import discover_public_accounts, normalize_target
+from app.osint.account_discovery import default_providers, discover_public_accounts, normalize_target
 from app.osint.service_catalog import build_account_discovery_matrix
 from app.providers.base import ProviderResult, finding
 
@@ -27,42 +25,36 @@ def test_email_normalization_and_username_extraction():
     assert target.domain == "example.com"
 
 
-def test_provider_selection_and_success_are_deterministic():
+def test_default_provider_selection_is_explicit():
+    assert [provider.name for provider in default_providers()] == ["Gravatar", "GitHub", "GitLab", "Have I Been Pwned"]
+
+
+def test_provider_success_and_evidence_preservation_are_deterministic():
     checked = datetime.now(timezone.utc)
     provider = FakeProvider("GitHub", ProviderResult("GitHub", "ok", [finding("GitHub", "profile_candidate", "https://github.com/example", .45, source_url="https://github.com/example", notes="Evidence state: possible_match.")], checked_at=checked))
     result = asyncio.run(discover_public_accounts("User@Example.com", providers=(provider,)))
     assert result["target"].email == "User@example.com"
     assert result["providers"][0]["status"] == "OK"
+    assert result["providers"][0]["checked_at"] == checked
     assert result["findings"][0]["evidence_state"] == "possible_match"
 
 
 def test_failure_timeout_and_unconfigured_statuses_never_become_negative_evidence():
-    providers = (
-        FakeProvider("Failure", exc=RuntimeError("boom")),
-        FakeProvider("Timeout", exc=asyncio.TimeoutError()),
-        FakeProvider("Unconfigured", ProviderResult("Unconfigured", "unconfigured", message="missing key")),
-    )
+    providers = (FakeProvider("Failure", exc=RuntimeError("boom")), FakeProvider("Timeout", exc=asyncio.TimeoutError()), FakeProvider("Unconfigured", ProviderResult("Unconfigured", "unconfigured", message="missing key")))
     result = asyncio.run(discover_public_accounts("user@example.com", providers=providers))
     assert [row["status"] for row in result["providers"]] == ["ERROR", "ERROR", "UNCONFIGURED"]
     assert result["findings"] == []
 
 
 def test_no_public_evidence_is_distinct_from_unavailable():
-    findings = [
-        {"source": "GitHub", "finding_type": "provider_status", "value": "ok", "confidence": 1.0},
-        {"source": "GitLab", "finding_type": "provider_status", "value": "unavailable", "confidence": 1.0},
-    ]
+    findings = [{"source": "GitHub", "finding_type": "provider_status", "value": "ok", "confidence": 1.0}, {"source": "GitLab", "finding_type": "provider_status", "value": "unavailable", "confidence": 1.0}]
     rows = build_account_discovery_matrix(findings)
     assert next(r for r in rows if r["service"] == "GitHub")["status"] == "NO PUBLIC EVIDENCE"
     assert next(r for r in rows if r["service"] == "GitLab")["status"] == "UNAVAILABLE"
 
 
 def test_corroborated_match_and_confidence_are_preserved():
-    rows = build_account_discovery_matrix([{
-        "source": "GitLab", "finding_type": "profile_candidate", "value": "https://gitlab.com/example",
-        "confidence": .95, "evidence_state": "corroborated_match", "source_url": "https://gitlab.com/example",
-        "notes": "exact public email match",
-    }])
+    rows = build_account_discovery_matrix([{"source": "GitLab", "finding_type": "profile_candidate", "value": "https://gitlab.com/example", "confidence": .95, "evidence_state": "corroborated_match", "source_url": "https://gitlab.com/example", "notes": "exact public email match"}])
     row = next(r for r in rows if r["service"] == "GitLab")
     assert row["status"] == "FOUND"
     assert row["confidence"] == .95
@@ -70,10 +62,7 @@ def test_corroborated_match_and_confidence_are_preserved():
 
 
 def test_duplicate_findings_are_removed():
-    provider = FakeProvider("GitHub", ProviderResult("GitHub", "ok", [
-        finding("GitHub", "profile_candidate", "https://github.com/example", .45),
-        finding("GitHub", "profile_candidate", "https://github.com/example", .45),
-    ]))
+    provider = FakeProvider("GitHub", ProviderResult("GitHub", "ok", [finding("GitHub", "profile_candidate", "https://github.com/example", .45), finding("GitHub", "profile_candidate", "https://github.com/example", .45)]))
     result = asyncio.run(discover_public_accounts("user@example.com", providers=(provider,)))
     assert len(result["findings"]) == 1
 
