@@ -17,69 +17,60 @@ def test_health_and_security_headers():
 
 
 def test_protected_api_requires_configuration():
-    settings=get_settings()
-    original=settings.api_key
-    settings.api_key=None
+    settings=get_settings(); original=settings.api_key; settings.api_key=None
     try:
         with TestClient(app) as c:
             r=c.get('/api/providers')
             assert r.status_code == 503
-    finally:
-        settings.api_key=original
+    finally: settings.api_key=original
 
 
 def test_protected_api_rejects_missing_and_invalid_keys():
-    settings=get_settings()
-    original=settings.api_key
-    settings.api_key='test-secret-key'
+    settings=get_settings(); original=settings.api_key; settings.api_key='test-secret-key'
     try:
         with TestClient(app) as c:
             assert c.get('/api/providers').status_code == 401
             assert c.get('/api/providers', headers={'Authorization':'Bearer wrong-key'}).status_code == 401
             assert c.get('/api/service-catalog').status_code == 401
-    finally:
-        settings.api_key=original
+    finally: settings.api_key=original
 
 
 def test_protected_api_accepts_valid_bearer_key():
-    settings=get_settings()
-    original=settings.api_key
-    settings.api_key='test-secret-key'
+    settings=get_settings(); original=settings.api_key; settings.api_key='test-secret-key'
     try:
         with TestClient(app) as c:
             r=c.get('/api/providers', headers={'Authorization':'Bearer test-secret-key'})
             assert r.status_code == 200
-            assert {'DNS','RDAP','Gravatar','GitHub','Have I Been Pwned','Ollama'} <= {x['name'] for x in r.json()}
+            providers={x['name']:x for x in r.json()}
+            assert {'DNS','RDAP','Gravatar','GitHub','GitLab','Have I Been Pwned','Public Web','Ollama'} <= set(providers)
+            assert providers['GitLab']['supported'] is True
+            assert providers['GitLab']['account_discovery'] is True
+            assert providers['Public Web']['account_discovery'] is True
             catalog=c.get('/api/service-catalog', headers={'Authorization':'Bearer test-secret-key'})
             assert catalog.status_code == 200
             github=next(x for x in catalog.json() if x['service']=='GitHub')
             assert {'service','category','supported','provider','discovery_methods'} <= set(github)
-    finally:
-        settings.api_key=original
+            gitlab=next(x for x in catalog.json() if x['service']=='GitLab')
+            assert gitlab['supported'] is True
+    finally: settings.api_key=original
 
 
 def test_provider_states_are_explicit():
-    settings=get_settings()
-    original=settings.api_key
-    settings.api_key='test-secret-key'
+    settings=get_settings(); original=settings.api_key; settings.api_key='test-secret-key'
     try:
         with TestClient(app) as c:
             data=c.get('/api/providers', headers={'Authorization':'Bearer test-secret-key'}).json()
             assert all(x['status'] for x in data)
-    finally:
-        settings.api_key=original
+    finally: settings.api_key=original
 
 
 def test_timeline_requires_bearer_authentication():
-    settings=get_settings()
-    original=settings.api_key
-    settings.api_key='test-secret-key'
+    settings=get_settings(); original=settings.api_key; settings.api_key='test-secret-key'
     try:
         with TestClient(app) as c:
             assert c.get('/api/investigations/1/timeline').status_code == 401
             assert c.get('/api/investigations/1/timeline', headers={'Authorization':'Bearer wrong-key'}).status_code == 401
-    finally:
-        settings.api_key=original
+    finally: settings.api_key=original
 
 
 def test_module_projection_marks_only_authoritative_attempt_current():
