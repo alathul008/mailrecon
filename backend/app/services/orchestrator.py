@@ -11,6 +11,12 @@ from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED
 from app.osint.dns import resolve, record_presence
 from app.providers.ollama import OllamaProvider
 from app.providers.base import ProviderResult, finding
+from app.providers.github import GitHubProvider
+from app.providers.gitlab import GitLabProvider
+from app.providers.gravatar import GravatarProvider
+from app.providers.hibp import HIBPProvider
+from app.providers.public_web import PublicWebProvider
+from app.providers.rdap import RDAPProvider
 from app.providers.registry import execute, provider_definitions
 from app.risk.engine import calculate
 from app.services.lifecycle import execution_is_owned, fence_execution, heartbeat_investigation, finish_execution_attempt
@@ -101,7 +107,10 @@ async def _provider_tasks_owned(inv_id,token,tasks,*,poll_interval=0.25):
 
 def _provider_tasks_outcome(tasks):
     return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
-async def _run_provider_call(definition,email,domain,candidates): return await execute(definition,email=email,domain=domain,candidates=candidates)
+
+async def _run_provider_call(definition,email,domain,candidates):
+    factory = globals().get(definition.factory_symbol) if definition.factory_symbol else None
+    return await execute(definition,email=email,domain=domain,candidates=candidates,factory=factory)
 
 async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     definitions=tuple(item for item in PROVIDER_DEFINITIONS if item.factory is not None)
