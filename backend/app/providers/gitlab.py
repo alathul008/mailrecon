@@ -4,7 +4,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.osint.email import EVIDENCE_CORROBORATED
-from app.providers.base import ProviderResult, finding
+from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 
@@ -15,7 +15,7 @@ class GitLabProvider:
     name = "GitLab"
     endpoint = "https://gitlab.com/api/v4/users"
 
-    async def run(self, email: str) -> ProviderResult:
+    async def run(self, context: ProviderContext) -> ProviderResult:
         settings = get_settings()
         try:
             validate_provider_url(self.endpoint)
@@ -26,7 +26,7 @@ class GitLabProvider:
                 trust_env=False,
                 transport=pinned_transport(self.endpoint),
             ) as client:
-                response = await client.get(self.endpoint, params={"search": email})
+                response = await client.get(self.endpoint, params={"search": context.email})
             failure = classify_response(self.name, response)
             if failure:
                 return failure
@@ -36,7 +36,7 @@ class GitLabProvider:
             if not isinstance(data, list):
                 return ProviderResult(self.name, "error", message="GitLab user lookup response was malformed")
 
-            normalized_email = email.strip().lower()
+            normalized_email = context.email.strip().lower()
             findings = []
             for user in data:
                 if not isinstance(user, dict):
@@ -49,7 +49,7 @@ class GitLabProvider:
                 if not isinstance(username, str) or not username:
                     continue
                 if not isinstance(web_url, str) or not web_url.startswith("https://gitlab.com/"):
-                    web_url = f"https://gitlab.com/{quote(username, safe='') }"
+                    web_url = f"https://gitlab.com/{quote(username, safe='')}"
                 findings.append(
                     finding(
                         self.name,
