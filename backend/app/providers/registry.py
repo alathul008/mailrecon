@@ -26,15 +26,16 @@ class ProviderDefinition:
     factory: Callable[[], Any] | None = None
     argument_mode: str = "email"
     module: str | None = None
+    factory_symbol: str | None = None
 
 PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
     ProviderDefinition("DNS", "Network", True, ("dns_resolution",), "none", True, False, True),
-    ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap"),
-    ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar"),
-    ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery"),
-    ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab"),
-    ProviderDefinition("Have I Been Pwned", "Other", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources"),
-    ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web"),
+    ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap", "RDAPProvider"),
+    ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar", "GravatarProvider"),
+    ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery", "GitHubProvider"),
+    ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab", "GitLabProvider"),
+    ProviderDefinition("Have I Been Pwned", "Other", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources", "HIBPProvider"),
+    ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web", "PublicWebProvider"),
     ProviderDefinition("Ollama", "Local AI", True, ("local_model_api",), "optional local model", False, False, False),
 )
 
@@ -57,25 +58,20 @@ def provider_names(*, orchestrated: bool | None = None, account_discovery: bool 
 
 def configured_status(definition: ProviderDefinition) -> str:
     settings = get_settings()
-    if definition.name == "GitHub":
-        return "configured" if settings.github_token else "available"
-    if definition.name == "Have I Been Pwned":
-        return "configured" if settings.hibp_api_key else "unconfigured"
-    if definition.name == "Public Web":
-        return "configured" if settings.public_web_search_url else "unconfigured"
-    if definition.name == "Ollama":
-        return "configured" if settings.enable_ollama else "disabled"
+    if definition.name == "GitHub": return "configured" if settings.github_token else "available"
+    if definition.name == "Have I Been Pwned": return "configured" if settings.hibp_api_key else "unconfigured"
+    if definition.name == "Public Web": return "configured" if settings.public_web_search_url else "unconfigured"
+    if definition.name == "Ollama": return "configured" if settings.enable_ollama else "disabled"
     return "available"
 
-def instantiate(definition: ProviderDefinition) -> Any:
-    if definition.factory is None:
+def instantiate(definition: ProviderDefinition, factory: Callable[[], Any] | None = None) -> Any:
+    selected = factory or definition.factory
+    if selected is None:
         raise RuntimeError(f"Provider {definition.name} has no executable factory")
-    return definition.factory()
+    return selected()
 
-async def execute(definition: ProviderDefinition, *, email: str, domain: str, candidates: list[str]):
-    provider = instantiate(definition)
-    if definition.argument_mode == "domain":
-        return await provider.run(domain)
-    if definition.argument_mode == "candidates":
-        return await provider.run(candidates, email)
+async def execute(definition: ProviderDefinition, *, email: str, domain: str, candidates: list[str], factory: Callable[[], Any] | None = None):
+    provider = instantiate(definition, factory)
+    if definition.argument_mode == "domain": return await provider.run(domain)
+    if definition.argument_mode == "candidates": return await provider.run(candidates, email)
     return await provider.run(email)
