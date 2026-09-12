@@ -17,7 +17,7 @@ from app.services import lifecycle, orchestrator
 
 class _FakeProvider:
     def __init__(self,name,result): self.name=name; self.result=result
-    async def run(self,context): return self.result(context)
+    async def run(self,context): return await self.result(context)
 
 @pytest.mark.asyncio
 async def test_durable_pipeline_persists_current_attempt_and_projects_public_web(monkeypatch):
