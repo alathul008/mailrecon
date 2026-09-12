@@ -94,7 +94,7 @@ class RDAPProvider:
             registrar = self._registrar(data)
             if registrar:
                 findings.append(finding(self.name, "registrar", registrar, 0.95, "info", url, notes="Public RDAP registrar metadata; not proof of domain ownership.", evidence_state=EVIDENCE_OBSERVED))
-            registry = data.get("port43")
+            registry = data.get("registry")
             if isinstance(registry, str) and registry:
                 findings.append(finding(self.name, "registry", registry, 0.85, "info", url, evidence_state=EVIDENCE_OBSERVED))
             statuses = data.get("status")
