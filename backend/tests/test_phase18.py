@@ -25,12 +25,13 @@ class _FakeProvider:
 async def test_provider_work_is_cancelled_when_execution_ownership_is_lost(monkeypatch):
     started = asyncio.Event()
     cancelled = asyncio.Event()
-    providers = [_FakeProvider(started, cancelled) for _ in range(4)]
+    providers = [_FakeProvider(started, cancelled) for _ in range(5)]
 
     monkeypatch.setattr(orchestrator, "GravatarProvider", lambda: providers[0])
     monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: providers[1])
     monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: providers[2])
-    monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: providers[3])
+    monkeypatch.setattr(orchestrator, "GitLabProvider", lambda: providers[3])
+    monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: providers[4])
 
     ownership_checks = iter([True, False])
     monkeypatch.setattr(orchestrator, "execution_is_owned", lambda db, inv_id, token: next(ownership_checks))
@@ -65,6 +66,7 @@ async def test_provider_result_is_rejected_after_ownership_loss(monkeypatch):
     monkeypatch.setattr(orchestrator, "GravatarProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: FastProvider("RDAP"))
     monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: FastProvider("GitHub"))
+    monkeypatch.setattr(orchestrator, "GitLabProvider", lambda: FastProvider("GitLab"))
     monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: FastProvider("Have I Been Pwned"))
 
     ownership_checks = iter([True, False])
@@ -88,6 +90,7 @@ async def test_provider_timeout_is_returned_as_provider_failure(monkeypatch):
     monkeypatch.setattr(orchestrator, "GravatarProvider", TimeoutProvider)
     monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: type("P", (), {"run": lambda self, *args: ok("RDAP")})())
     monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: type("P", (), {"run": lambda self, *args: ok("GitHub")})())
+    monkeypatch.setattr(orchestrator, "GitLabProvider", lambda: type("P", (), {"run": lambda self, *args: ok("GitLab")})())
     monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: type("P", (), {"run": lambda self, *args: ok("Have I Been Pwned")})())
 
     results = await orchestrator.run_providers("test@example.com", "example.com", ["test"])
@@ -107,6 +110,7 @@ async def test_external_disclosure_disabled_never_starts_provider_tasks(monkeypa
     monkeypatch.setattr(orchestrator, "GravatarProvider", UnexpectedProvider)
     monkeypatch.setattr(orchestrator, "RDAPProvider", UnexpectedProvider)
     monkeypatch.setattr(orchestrator, "GitHubProvider", UnexpectedProvider)
+    monkeypatch.setattr(orchestrator, "GitLabProvider", UnexpectedProvider)
     monkeypatch.setattr(orchestrator, "HIBPProvider", UnexpectedProvider)
 
     results = await orchestrator.run_providers(
@@ -114,4 +118,4 @@ async def test_external_disclosure_disabled_never_starts_provider_tasks(monkeypa
     )
 
     assert calls == []
-    assert [result.status for result in results] == ["disabled"] * 4
+    assert [result.status for result in results] == ["disabled"] * 5

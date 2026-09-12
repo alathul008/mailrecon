@@ -9,22 +9,15 @@ from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
 from app.osint.dns import resolve, record_presence
-from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, RDAPProvider
+from app.providers import HIBPProvider, GravatarProvider, GitHubProvider, GitLabProvider, RDAPProvider
 from app.providers.ollama import OllamaProvider
 from app.providers.base import ProviderResult, finding
 from app.risk.engine import calculate
 from app.services.lifecycle import execution_is_owned, fence_execution, heartbeat_investigation, finish_execution_attempt
 
-MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","breach_sources","risk_calculation","graph_build"]
+MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","gitlab","breach_sources","risk_calculation","graph_build"]
 DERIVED_USERNAME_RELATION = "derived_username"
-MODULE_TRANSITIONS = {
-    "queued": {"queued", "running", "completed", "skipped", "abandoned"},
-    "running": {"running", "completed", "failed", "skipped", "abandoned"},
-    "completed": {"completed"},
-    "failed": {"failed"},
-    "skipped": {"skipped"},
-    "abandoned": {"abandoned"},
-}
+MODULE_TRANSITIONS = {"queued": {"queued", "running", "completed", "skipped", "abandoned"}, "running": {"running", "completed", "failed", "skipped", "abandoned"}, "completed": {"completed"}, "failed": {"failed"}, "skipped": {"skipped"}, "abandoned": {"abandoned"}}
 
 def utcnow(): return datetime.now(timezone.utc)
 def _require_ownership(db, inv_id, token):
@@ -87,7 +80,7 @@ def add_findings(db,inv_id,fs,token=None):
 
 def provider_finding(result):
     severity="warning" if result.status in {"error","rate_limited","unavailable"} else "info"
-    return finding(result.provider,"provider_status",result.status,1.0,severity,notes=result.message or "Provider execution completed.",raw_reference={"status":result.status})
+    return finding(result.provider,"provider_status",result.status,1.0,severity,notes=result.message or "Provider execution completed.",raw_reference={"status":result.status,"checked_at":result.checked_at.isoformat()})
 
 class ProviderOwnershipLost(RuntimeError):
     """Provider work was abandoned because the execution lease was lost."""
@@ -103,24 +96,20 @@ async def _provider_tasks_owned(inv_id,token,tasks,*,poll_interval=0.25):
         if not pending:return
         await asyncio.sleep(poll_interval)
         with SessionLocal() as db:
-            if not execution_is_owned(db,inv_id,token):
-                raise ProviderOwnershipLost("Provider work abandoned after execution ownership was lost")
+            if not execution_is_owned(db,inv_id,token): raise ProviderOwnershipLost("Provider work abandoned after execution ownership was lost")
 
 def _provider_tasks_outcome(tasks):
     return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
-
-async def _run_provider_call(provider_call):
-    return await provider_call()
+async def _run_provider_call(provider_call): return await provider_call()
 
 async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     if not allow_external:
         message="External provider disclosure disabled for this investigation"
-        return [ProviderResult("Gravatar","disabled",message=message),ProviderResult("RDAP","disabled",message=message),ProviderResult("GitHub","disabled",message=message),ProviderResult("Have I Been Pwned","disabled",message=message)]
-    calls=[lambda:GravatarProvider().run(email),lambda:RDAPProvider().run(domain),lambda:GitHubProvider().run(candidates,email),lambda:HIBPProvider().run(email)]
+        return [ProviderResult("Gravatar","disabled",message=message),ProviderResult("RDAP","disabled",message=message),ProviderResult("GitHub","disabled",message=message),ProviderResult("GitLab","disabled",message=message),ProviderResult("Have I Been Pwned","disabled",message=message)]
+    calls=[lambda:GravatarProvider().run(email),lambda:RDAPProvider().run(domain),lambda:GitHubProvider().run(candidates,email),lambda:GitLabProvider().run(email),lambda:HIBPProvider().run(email)]
     tasks=[asyncio.create_task(_run_provider_call(call)) for call in calls]
     if inv_id is None or token is None:return await asyncio.gather(*tasks,return_exceptions=True)
-    monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks))
-    gathered=None
+    monitor=asyncio.create_task(_provider_tasks_owned(inv_id,token,tasks));gathered=None
     try:
         while True:
             done,_=await asyncio.wait([*tasks,monitor],return_when=asyncio.FIRST_COMPLETED)
@@ -128,13 +117,11 @@ async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:in
                 exc=monitor.exception()
                 if exc is not None:raise exc
                 break
-            if all(task.done() for task in tasks):
-                break
+            if all(task.done() for task in tasks):break
         gathered=_provider_tasks_outcome(tasks)
         try:
             with SessionLocal() as db:_require_ownership(db,inv_id,token)
-        except RuntimeError as exc:
-            raise ProviderOwnershipLost(str(exc)) from exc
+        except RuntimeError as exc:raise ProviderOwnershipLost(str(exc)) from exc
         return gathered
     finally:
         if not monitor.done():
@@ -149,6 +136,7 @@ def _finding_evidence_state(row):
     notes=getattr(row,"notes",None) or "";marker="Evidence state: "
     if marker in notes:return notes.split(marker,1)[1].split(".",1)[0].strip()
     return None
+
 def _rdap_domain_consistency(domain,result):
     if isinstance(result,Exception) or getattr(result,"status",None)!="ok":return None
     observed=[f.get("value","").split(": ",1)[1] for f in result.findings if f.get("finding_type")=="domain" and isinstance(f.get("value"),str) and f["value"].startswith("ldhName: ")]
@@ -168,6 +156,7 @@ async def _heartbeat_loop(inv_id,token,stop_event):
         except asyncio.TimeoutError:
             with SessionLocal() as db:
                 if not heartbeat_investigation(db,inv_id,token):return
+
 def mark_investigation_failed(db,inv_id,token,exc):
     try:execution_id,execution_attempt_id=fence_execution(db,inv_id,token)
     except RuntimeError:return False
@@ -179,6 +168,7 @@ def mark_investigation_failed(db,inv_id,token,exc):
         if m.status=="running":set_module(db,inv_id,m.module,"failed",f"Investigation failed: {type(exc).__name__}")
         elif m.status=="queued":set_module(db,inv_id,m.module,"skipped","Not executed after investigation failure")
     finish_execution_attempt(db,inv_id,execution_attempt_id,"failed",reason=f"{type(exc).__name__}: investigation execution failed");db.commit();return True
+
 async def run_investigation(inv_id:int,token:str):
     heartbeat_stop=asyncio.Event();heartbeat_task=asyncio.create_task(_heartbeat_loop(inv_id,token,heartbeat_stop))
     with SessionLocal() as db:
@@ -193,8 +183,9 @@ async def run_investigation(inv_id:int,token:str):
             for k in ["A","AAAA","MX","NS","CNAME","SPF","DMARC"]:
                 if dns.get(k):fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),.99,"info",notes=f"Public DNS response. Evidence state: {EVIDENCE_OBSERVED}."))
             dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown";fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure."));add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
-            for n in ["gravatar","rdap","public_profile_discovery","breach_sources"]:set_module(db,inv_id,n,"running",token=token)
-            results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure);mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("breach_sources",results[3])]
+            for n in ["gravatar","rdap","public_profile_discovery","gitlab","breach_sources"]:set_module(db,inv_id,n,"running",token=token)
+            results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure)
+            mapping=[("gravatar",results[0]),("rdap",results[1]),("public_profile_discovery",results[2]),("gitlab",results[3]),("breach_sources",results[4])]
             for name,res in mapping:
                 if isinstance(res,Exception):set_module(db,inv_id,name,"failed",f"Provider exception: {type(res).__name__}",token);add_findings(db,inv_id,[finding(name,"provider_status","error",1.0,"warning",notes=f"Provider raised {type(res).__name__}")],token)
                 else:add_findings(db,inv_id,[provider_finding(res),*res.findings],token);set_module(db,inv_id,name,"completed" if res.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",res.message,token)

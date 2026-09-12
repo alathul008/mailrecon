@@ -41,12 +41,13 @@ def install_fake_providers(monkeypatch, factory):
     monkeypatch.setattr(orchestrator, "GravatarProvider", lambda: make("Gravatar"))
     monkeypatch.setattr(orchestrator, "RDAPProvider", lambda: make("RDAP"))
     monkeypatch.setattr(orchestrator, "GitHubProvider", lambda: make("GitHub"))
+    monkeypatch.setattr(orchestrator, "GitLabProvider", lambda: make("GitLab"))
     monkeypatch.setattr(orchestrator, "HIBPProvider", lambda: make("Have I Been Pwned"))
 
 
 @pytest.mark.asyncio
 async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
-    names = ("Gravatar", "RDAP", "GitHub", "Have I Been Pwned")
+    names = ("Gravatar", "RDAP", "GitHub", "GitLab", "Have I Been Pwned")
     started = {name: asyncio.Event() for name in names}
     cancelled = {name: asyncio.Event() for name in names}
     provider_tasks = []
@@ -77,7 +78,7 @@ async def test_multiple_provider_tasks_are_cancelled_and_drained(monkeypatch):
 
     assert all(event.is_set() for event in started.values())
     assert all(event.is_set() for event in cancelled.values())
-    assert len(provider_tasks) == 4
+    assert len(provider_tasks) == 5
     assert all(task.done() for task in provider_tasks)
 
 
@@ -225,6 +226,7 @@ async def test_timeout_during_ownership_transition_is_not_accepted(monkeypatch):
     monkeypatch.setattr(orchestrator, "GravatarProvider", TimeoutProvider)
     monkeypatch.setattr(orchestrator, "RDAPProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "GitHubProvider", SlowProvider)
+    monkeypatch.setattr(orchestrator, "GitLabProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "HIBPProvider", SlowProvider)
     monkeypatch.setattr(orchestrator, "execution_is_owned", lambda db, inv_id, token: owned["value"])
 

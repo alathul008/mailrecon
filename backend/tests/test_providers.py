@@ -291,16 +291,20 @@ async def test_provider_execution_isolated_when_one_raises(monkeypatch):
     async def ok_github(self, candidates, email):
         return ProviderResult("GitHub", "ok", message="done")
 
+    async def ok_gitlab(self, email):
+        return ProviderResult("GitLab", "ok", message="done")
+
     async def unconfigured_hibp(self, email):
         return ProviderResult("Have I Been Pwned", "unconfigured")
 
     monkeypatch.setattr(orchestrator.GravatarProvider, "run", ok_gravatar)
     monkeypatch.setattr(orchestrator.RDAPProvider, "run", broken_rdap)
     monkeypatch.setattr(orchestrator.GitHubProvider, "run", ok_github)
+    monkeypatch.setattr(orchestrator.GitLabProvider, "run", ok_gitlab)
     monkeypatch.setattr(orchestrator.HIBPProvider, "run", unconfigured_hibp)
 
     results = await orchestrator.run_providers("user@example.com", "example.com", ["example"])
-    assert [result.status if not isinstance(result, Exception) else type(result).__name__ for result in results] == ["ok", "RuntimeError", "ok", "unconfigured"]
+    assert [result.status if not isinstance(result, Exception) else type(result).__name__ for result in results] == ["ok", "RuntimeError", "ok", "ok", "unconfigured"]
 
 
 def test_privacy_mode_strips_provider_raw_reference():
