@@ -132,7 +132,13 @@ def graph(inv_id:int,db:Session=Depends(get_db)):
 
 @router.get("/investigations/{inv_id}/report", dependencies=[Depends(require_api_key)])
 def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
-    inv,fs,_=load(inv_id,db); generated_at=datetime.now(timezone.utc); provenance=report_provenance(db,inv,generated_at); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor",Finding.execution_attempt_id==inv.execution_attempt_id)); factors=[{"delta":int((f.notes or "").replace("Score delta: ","").strip() or 0),"reason":f.value} for f in fq.scalars()]
+    inv,fs,_=load(inv_id,db); generated_at=datetime.now(timezone.utc); provenance=report_provenance(db,inv,generated_at); fq=db.execute(select(Finding).where(Finding.investigation_id==inv_id,Finding.finding_type=="risk_factor",Finding.execution_attempt_id==inv.execution_attempt_id)); factors=[]
+    for f in fq.scalars():
+        delta=0
+        if f.notes and "Score delta:" in f.notes:
+            try: delta=int(f.notes.split("Score delta:",1)[1].split(";",1)[0].strip())
+            except ValueError: delta=0
+        factors.append({"delta":delta,"reason":f.value})
     if format=="json": return {"provenance":provenance,"target":inv.target,"risk_score":inv.risk_score,"risk_level":inv.risk_level,"findings":[{**finding_projection(f,inv.execution_attempt_id)} for f in fs],"risk_factors":factors}
     if format=="csv":
         s=io.StringIO(); w=csv.writer(s); w.writerow(["report_generated_at","investigation_id","execution_id","execution_attempt_id","attempt_status","attempt_started_at","attempt_finished_at","recovered_at","recovery_reason","external_provider_disclosure","privacy_mode","source","type","value","confidence","evidence_state","severity","current_attempt","historical_attempt","source_url","notes"])
