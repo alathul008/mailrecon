@@ -10,7 +10,7 @@ from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
 from app.osint.dns import resolve, record_presence
 from app.providers.ollama import OllamaProvider
-from app.providers.base import ProviderResult, finding
+from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.github import GitHubProvider
 from app.providers.gitlab import GitLabProvider
 from app.providers.gravatar import GravatarProvider
@@ -26,12 +26,23 @@ MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","
 DERIVED_USERNAME_RELATION = "derived_username"
 MODULE_TRANSITIONS = {"queued": {"queued", "running", "completed", "skipped", "abandoned"}, "running": {"running", "completed", "failed", "skipped", "abandoned"}, "completed": {"completed"}, "failed": {"failed"}, "skipped": {"skipped"}, "abandoned": {"abandoned"}}
 
+# Explicit construction hooks keep existing monkeypatch-based tests possible without
+# resolving provider classes through dynamic global symbol lookup.
+PROVIDER_FACTORY_RESOLVERS = {
+    "Gravatar": lambda: GravatarProvider(),
+    "RDAP": lambda: RDAPProvider(),
+    "GitHub": lambda: GitHubProvider(),
+    "GitLab": lambda: GitLabProvider(),
+    "Have I Been Pwned": lambda: HIBPProvider(),
+    "Public Web": lambda: PublicWebProvider(),
+}
+
 def utcnow(): return datetime.now(timezone.utc)
 def _require_ownership(db, inv_id, token):
     if not execution_is_owned(db,inv_id,token): raise RuntimeError("Investigation execution lease is no longer owned")
 def _capture_owned_execution(db, inv_id, token): return fence_execution(db,inv_id,token)
-def _persistence_key(f):
-    payload={"source":f.get("source"),"source_url":f.get("source_url"),"finding_type":f.get("finding_type"),"value":f.get("value"),"first_seen":f.get("first_seen").isoformat() if f.get("first_seen") else None}
+def _persistence_key(f, execution_attempt_id):
+    payload={"execution_attempt_id":execution_attempt_id,"source":f.get("source"),"source_url":f.get("source_url"),"finding_type":f.get("finding_type"),"value":f.get("value"),"first_seen":f.get("first_seen").isoformat() if f.get("first_seen") else None}
     return hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",",":"),default=str).encode()).hexdigest()
 
 def set_module(db,inv_id,name,status,message=None,token=None):
@@ -76,11 +87,11 @@ def add_findings(db,inv_id,fs,token=None):
         if inv.privacy_mode:
             f["raw_reference"]=None
             if f.get("finding_type")=="profile_candidate" and f.get("evidence_state")==EVIDENCE_POSSIBLE:continue
-        key=_persistence_key(f)
+        key=_persistence_key(f,execution_attempt_id)
         if key in inserted:continue
-        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==execution_id,Finding.persistence_key==key))
+        existing=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==execution_attempt_id,Finding.persistence_key==key))
         if existing:inserted.add(key);continue
-        legacy=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_id==execution_id,Finding.persistence_key.is_(None),Finding.source==f.get("source"),Finding.source_url==f.get("source_url"),Finding.finding_type==f.get("finding_type"),Finding.value==f.get("value"),Finding.first_seen==f.get("first_seen")))
+        legacy=db.scalar(select(Finding.id).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==execution_attempt_id,Finding.persistence_key.is_(None),Finding.source==f.get("source"),Finding.source_url==f.get("source_url"),Finding.finding_type==f.get("finding_type"),Finding.value==f.get("value"),Finding.first_seen==f.get("first_seen")))
         if legacy:inserted.add(key);continue
         db.add(Finding(investigation_id=inv_id,execution_id=execution_id,execution_attempt_id=execution_attempt_id,persistence_key=key,**f));inserted.add(key)
     db.commit()
@@ -109,8 +120,9 @@ def _provider_tasks_outcome(tasks):
     return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
 
 async def _run_provider_call(definition,email,domain,candidates):
-    factory = globals().get(definition.factory_symbol) if definition.factory_symbol else None
-    return await execute(definition,email=email,domain=domain,candidates=candidates,factory=factory)
+    context=ProviderContext(email=email,domain=domain,candidates=tuple(candidates))
+    factory=PROVIDER_FACTORY_RESOLVERS.get(definition.name)
+    return await execute(definition,context=context,factory=factory)
 
 async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     definitions=tuple(item for item in PROVIDER_DEFINITIONS if item.factory is not None)

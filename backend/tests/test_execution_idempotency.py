@@ -180,10 +180,10 @@ def test_recovery_creates_new_attempt_but_preserves_logical_identity(tmp_path):
             "raw_reference": None,
         }], token_b)
         findings = db.scalars(select(Finding).where(Finding.investigation_id == inv.id)).all()
-        assert len(findings) == 1
-        assert findings[0].execution_id == execution_id
-        assert findings[0].execution_attempt_id == attempt_a
-        assert findings[0].persistence_key
+        assert len(findings) == 2
+        assert {finding.execution_id for finding in findings} == {execution_id}
+        assert {finding.execution_attempt_id for finding in findings} == {attempt_a, attempt_b}
+        assert all(finding.persistence_key for finding in findings)
 
 
 def test_separate_investigations_remain_distinct_acquisitions(tmp_path):
@@ -252,7 +252,8 @@ def test_risk_is_invariant_when_recovery_replays_same_evidence(tmp_path):
         findings = db.scalars(select(Finding).where(Finding.investigation_id == inv.id)).all()
         after = calculate({}, [{"finding_type": f.finding_type, "value": f.value, "confidence": f.confidence, "notes": f.notes, "raw_reference": f.raw_reference} for f in findings])
         assert (before.score, before.level, before.dimensions, before.factors) == (after.score, after.level, after.dimensions, after.factors)
-        assert len(findings) == 1
+        assert len(findings) == 2
+        assert {finding.execution_attempt_id for finding in findings} == {db.get(Investigation, inv.id).execution_attempt_id, next(f.execution_attempt_id for f in findings if f.execution_attempt_id != db.get(Investigation, inv.id).execution_attempt_id)}
 
 
 def test_stale_worker_is_fenced_after_recovery(tmp_path):

@@ -4,7 +4,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.osint.email import EVIDENCE_POSSIBLE
-from app.providers.base import ProviderResult, finding
+from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 
@@ -20,9 +20,9 @@ class PublicWebProvider:
 
     name = "Public Web"
 
-    def _queries(self, email: str, candidates: list[str]) -> list[str]:
-        queries = [f'"{email}"']
-        queries.extend(f'"{candidate}"' for candidate in candidates[:4])
+    def _queries(self, context: ProviderContext) -> list[str]:
+        queries = [f'"{context.email}"']
+        queries.extend(f'"{candidate}"' for candidate in context.candidates[:4])
         return list(dict.fromkeys(queries))
 
     @staticmethod
@@ -32,7 +32,7 @@ class PublicWebProvider:
         results = data.get("results")
         return [item for item in results if isinstance(item, dict)] if isinstance(results, list) else []
 
-    async def run(self, email: str, candidates: list[str]) -> ProviderResult:
+    async def run(self, context: ProviderContext) -> ProviderResult:
         settings = get_settings()
         endpoint = settings.public_web_search_url
         if not endpoint:
@@ -59,7 +59,7 @@ class PublicWebProvider:
                 trust_env=False,
                 transport=pinned_transport(endpoint),
             ) as client:
-                for query in self._queries(email, candidates):
+                for query in self._queries(context):
                     url = f"{endpoint}?q={quote_plus(query)}&format=json"
                     validate_provider_url(url)
                     response = await client.get(url)
