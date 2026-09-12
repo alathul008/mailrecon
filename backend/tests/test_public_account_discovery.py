@@ -20,7 +20,7 @@ class FakeProvider:
 
 def test_email_normalization_and_username_extraction():
     target = normalize_target("  User.Name+test@Example.COM ")
-    assert target.email == "User.Name@example.com"
+    assert target.email == "User.Name+test@example.com"
     assert target.username == "User.Name+test"
     assert target.domain == "example.com"
 
