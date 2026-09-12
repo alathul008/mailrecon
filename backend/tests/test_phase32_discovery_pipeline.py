@@ -79,22 +79,18 @@ def test_provider_failures_never_project_as_negative_account_evidence():
 
 
 def test_public_web_possible_evidence_correlates_without_identity_confirmation():
-    from app.osint.correlation import correlate
+    from app.osint.correlation import correlate_email_findings
 
-    result = correlate(
-        "target@example.com",
-        "example.com",
-        [{
-            "id": 9,
-            "source": "Public Web",
-            "finding_type": "public_web_reference",
-            "value": "Public result",
-            "confidence": 0.55,
-            "evidence_state": "possible_match",
-            "source_url": "https://example.com/result",
-            "notes": "Public search correlation; not identity confirmation.",
-        }],
-    )
+    result = correlate_email_findings([{
+        "id": 9,
+        "source": "Public Web",
+        "finding_type": "public_web_reference",
+        "value": "Public result",
+        "confidence": 0.55,
+        "evidence_state": "possible_match",
+        "source_url": "https://example.com/result",
+        "notes": "Public search correlation; not identity confirmation.",
+    }])
     relationship = next(item for item in result["relationships"] if item["relationship"] == "public_web_observation")
     assert relationship["evidence_state"] == "possible_match"
     assert relationship["confidence"] == 0.55
