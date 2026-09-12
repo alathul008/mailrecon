@@ -12,28 +12,25 @@ class ServiceDefinition:
     public_web_discovery: bool = False
 
 
-# The catalogue is deliberately declarative. A service is not considered
-# discoverable merely because it appears here; only a provider with an
-# implemented, legitimate public discovery method can produce evidence.
 SERVICE_CATALOG: tuple[ServiceDefinition, ...] = (
     ServiceDefinition("GitHub", "Developer", ("public_profile_api",), True, "GitHub", True),
-    ServiceDefinition("GitLab", "Developer", ("public_profile_api", "public_web_search"), True, "GitLab", True),
-    ServiceDefinition("Steam", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Epic Games", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("EA", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Ubisoft", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Battle.net", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Xbox", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("PlayStation", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Nintendo", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Twitch", "Gaming", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Discord", "Communication", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Reddit", "Social", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("X", "Social", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("LinkedIn", "Professional", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Stack Overflow", "Developer", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Dev.to", "Developer", ("public_profile_page", "public_web_search"), True, "Public Web", True),
-    ServiceDefinition("Medium", "Publishing", ("public_profile_page", "public_web_search"), True, "Public Web", True),
+    ServiceDefinition("GitLab", "Developer", ("public_profile_api", "public_web_search"), False, "GitLab", True),
+    ServiceDefinition("Steam", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Epic Games", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("EA", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Ubisoft", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Battle.net", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Xbox", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("PlayStation", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Nintendo", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Twitch", "Gaming", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Discord", "Communication", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Reddit", "Social", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("X", "Social", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("LinkedIn", "Professional", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Stack Overflow", "Developer", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Dev.to", "Developer", ("public_profile_page", "public_web_search"), False, "Public Web", True),
+    ServiceDefinition("Medium", "Publishing", ("public_profile_page", "public_web_search"), False, "Public Web", True),
     ServiceDefinition("Gravatar", "Avatar", ("public_hash_lookup",), True, "Gravatar"),
     ServiceDefinition("Have I Been Pwned", "Other", ("breach_metadata_api",), True, "Have I Been Pwned"),
     ServiceDefinition("Public Web", "Other", ("public_search_api",), True, "Public Web"),
@@ -91,12 +88,7 @@ def _service_status(defn: ServiceDefinition, findings: list[dict[str, Any]]) -> 
 
 
 def build_account_discovery_matrix(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Project persisted evidence into an analyst-facing service matrix.
-
-    Operational provider state and evidence state remain separate. In
-    particular, an unavailable/unconfigured provider never becomes a negative
-    account finding.
-    """
+    """Project persisted evidence into an analyst-facing service matrix."""
     matrix: list[dict[str, Any]] = []
     for definition in SERVICE_CATALOG:
         matches = _service_matches(definition, findings)
