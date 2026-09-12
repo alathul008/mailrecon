@@ -71,6 +71,8 @@ def test_current_risk_and_report_exclude_historical_risk_factors_but_retain_find
         token_a = lifecycle.claim_investigation(db, inv.id, now=old)
         attempt_a = db.get(Investigation, inv.id).execution_attempt_id
         add_findings(db, inv.id, [finding_data("https://example.test/historical", old), risk_factor("historical-risk", old)], token_a)
+        db.get(Investigation, inv.id).execution_heartbeat_at = old
+        db.commit()
 
         assert lifecycle.recover_stale_investigations(db, now=now) == 1
         token_b = lifecycle.claim_investigation(db, inv.id, now=now)
@@ -105,6 +107,8 @@ def test_current_graph_rebuild_excludes_historical_only_nodes_and_timeline_keeps
         token_a = lifecycle.claim_investigation(db, inv.id, now=old)
         attempt_a = db.get(Investigation, inv.id).execution_attempt_id
         add_findings(db, inv.id, [finding_data("https://example.test/historical", old)], token_a)
+        db.get(Investigation, inv.id).execution_heartbeat_at = old
+        db.commit()
         assert lifecycle.recover_stale_investigations(db, now=now) == 1
         token_b = lifecycle.claim_investigation(db, inv.id, now=now)
         attempt_b = db.get(Investigation, inv.id).execution_attempt_id
@@ -168,6 +172,8 @@ def test_empty_current_attempt_has_no_current_risk_factors_and_history_remains_q
         token_a = lifecycle.claim_investigation(db, inv.id, now=old)
         attempt_a = db.get(Investigation, inv.id).execution_attempt_id
         add_findings(db, inv.id, [risk_factor("historical-risk", old)], token_a)
+        db.get(Investigation, inv.id).execution_heartbeat_at = old
+        db.commit()
         assert lifecycle.recover_stale_investigations(db, now=now) == 1
         token_b = lifecycle.claim_investigation(db, inv.id, now=now)
         attempt_b = db.get(Investigation, inv.id).execution_attempt_id
