@@ -59,6 +59,45 @@ export type CorrelationResult = {
   semantics: Record<string, string>;
 };
 
+export type AccountDiscoveryEvidence = {
+  finding_id: number | null;
+  finding_type: string;
+  evidence_state: string | null;
+  confidence: number | null;
+  source: string | null;
+  source_url: string | null;
+  notes: string | null;
+};
+
+export type AccountDiscoveryService = {
+  category: string;
+  service: string;
+  status: string;
+  supported: boolean;
+  discovery_methods: string[];
+  identifier: string | null;
+  confidence: number | null;
+  provider_status: string | null;
+  checked_at: string | null;
+  evidence: AccountDiscoveryEvidence[];
+};
+
+export type AccountDiscovery = {
+  investigation_id: number;
+  target: string;
+  normalized_email: string | null;
+  username: string | null;
+  domain: string | null;
+  provider_execution_status: Array<{
+    provider: string;
+    status: string;
+    checked_at: string | null;
+    message: string | null;
+  }>;
+  semantics: Record<string, string>;
+  services: AccountDiscoveryService[];
+};
+
 // Keep the bearer key for the current browser tab/session only; never persist it
 // across browser restarts in localStorage.
 export function getApiKey() {
@@ -202,6 +241,10 @@ export function getTimeline(id: number) {
 
 export function getCorrelations(id: number) {
   return request<CorrelationResult>(`/investigations/${id}/correlations`);
+}
+
+export function getAccountDiscovery(id: number) {
+  return request<AccountDiscovery>(`/investigations/${id}/account-discovery`);
 }
 
 export function reportUrl(id: number, format: string) {
