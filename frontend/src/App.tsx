@@ -7,9 +7,9 @@ import { Investigations } from './pages/Investigations';
 import { Investigation } from './pages/Investigation';
 import { Comparison } from './pages/Comparison';
 
-type InvestigationTab = 'Overview' | 'Account Discovery' | 'Correlations' | 'Evidence' | 'Providers' | 'Timeline' | 'Graph' | 'Reports';
+type InvestigationTab = 'Overview' | 'Account Discovery' | 'Correlations' | 'Evidence' | 'Providers' | 'Timeline' | 'Graph' | 'Execution History' | 'Reports';
 type Route = { page: 'Dashboard' | 'Investigations' | 'Email Lookup' | 'Investigation' | 'Graph' | 'Comparison'; id?: number; left?: number; right?: number; tab?: InvestigationTab };
-const tabBySlug: Record<string, InvestigationTab> = { overview: 'Overview', 'account-discovery': 'Account Discovery', correlations: 'Correlations', evidence: 'Evidence', providers: 'Providers', timeline: 'Timeline', graph: 'Graph', reports: 'Reports' };
+const tabBySlug: Record<string, InvestigationTab> = { overview: 'Overview', 'account-discovery': 'Account Discovery', correlations: 'Correlations', evidence: 'Evidence', providers: 'Providers', timeline: 'Timeline', graph: 'Graph', 'execution-history': 'Execution History', reports: 'Reports' };
 const slugByTab: Record<InvestigationTab, string> = Object.fromEntries(Object.entries(tabBySlug).map(([slug, tab]) => [tab, slug])) as Record<InvestigationTab, string>;
 
 export function parseRoute(hash: string): Route {
