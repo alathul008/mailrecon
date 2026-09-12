@@ -12,15 +12,16 @@ from app.reports.render import pdf_report
 from app.core.auth import require_api_key
 from app.core.config import get_settings
 from app.core.rate_limit import allow_investigation_creation
+from app.providers.registry import configured_status, provider_definitions
 
 router=APIRouter(prefix="/api")
-TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach"}
+TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach","public_web_reference"}
 
 def evidence_state(f):
     if f.evidence_state: return f.evidence_state
-    notes=f.notes or ""; marker="Evidence state: "
-    if marker in notes: return notes.split(marker,1)[1].split(".",1)[0].strip()
     if isinstance(f.raw_reference,dict) and isinstance(f.raw_reference.get("evidence_state"),str): return f.raw_reference["evidence_state"]
+    notes=f.notes or ""; marker="Evidence state: "
+    if marker in notes:return notes.split(marker,1)[1].split(".",1)[0].strip()
     return None
 
 def timeline_timestamp(f): return f.first_seen or f.collected_at
@@ -50,8 +51,20 @@ def health(): return {"status":"ok","service":"MailRecon"}
 
 @router.get("/providers", dependencies=[Depends(require_api_key)])
 def providers():
-    s=get_settings()
-    return [{"name":"DNS","status":"available","configuration":"none"},{"name":"RDAP","status":"available","configuration":"none"},{"name":"Gravatar","status":"available","configuration":"none"},{"name":"GitHub","status":"configured" if s.github_token else "available","configuration":"optional GITHUB_TOKEN"},{"name":"Have I Been Pwned","status":"configured" if s.hibp_api_key else "unconfigured","configuration":"optional HIBP_API_KEY"},{"name":"Ollama","status":"configured" if s.enable_ollama else "disabled","configuration":"optional local model"}]
+    return [
+        {
+            "name": item.name,
+            "category": item.category,
+            "status": configured_status(item),
+            "configuration": item.configuration,
+            "supported": item.supported,
+            "discovery_methods": list(item.discovery_methods),
+            "external_network": item.external_network,
+            "account_discovery": item.account_discovery,
+            "orchestrated": item.orchestrated,
+        }
+        for item in provider_definitions()
+    ]
 
 @router.post("/investigations", dependencies=[Depends(require_api_key)])
 async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
@@ -132,22 +145,19 @@ def report(inv_id:int,format:str="json",db:Session=Depends(get_db)):
             p=finding_projection(f,inv.execution_attempt_id); w.writerow([provenance["report_generated_at"],provenance["investigation_id"],csv_safe(provenance["execution_id"]),csv_safe(provenance["execution_attempt_id"]),csv_safe(provenance["attempt_status"]),provenance["attempt_started_at"],provenance["attempt_finished_at"],provenance["recovered_at"],csv_safe(provenance["recovery_reason"]),provenance["external_provider_disclosure"],provenance["privacy_mode"],csv_safe(f.source),csv_safe(f.finding_type),csv_safe(f.value),f.confidence,csv_safe(evidence_state(f)),csv_safe(f.severity),p["current_attempt"],p["historical_attempt"],csv_safe(f.source_url),csv_safe(f.notes)])
         return Response(s.getvalue(),media_type="text/csv",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.csv"'})
     if format=="html":
-        p=provenance; meta="".join(f"<li><b>{html.escape(str(k))}</b>: {html.escape(str(v))}</li>" for k,v in p.items()); body=f"<html><body><h1>MailRecon Report</h1><h2>Provenance</h2><ul>{meta}</ul><p>Target: {html.escape(inv.target)}</p><h2>Risk {inv.risk_score}/100 — {html.escape(str(inv.risk_level))}</h2><ul>"+"".join(f"<li><b>{html.escape(f.severity)}</b> {html.escape(f.finding_type)}: {html.escape(f.value)} ({f.confidence:.0%}; {html.escape(str(evidence_state(f)))}; {'current' if inv.execution_attempt_id and f.execution_attempt_id == inv.execution_attempt_id else 'historical' if f.execution_attempt_id else 'unspecified'})</li>" for f in fs)+"</ul><p>OSINT findings are probabilistic and should be independently verified. Numeric confidence is not an identity probability; evidence state describes the strength/type of correlation. Provider status is distinct from a negative finding.</p></body></html>"; return HTMLResponse(body)
-    if format=="pdf": return Response(pdf_report(inv,fs,factors,provenance).read(),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.pdf"'})
-    raise HTTPException(400,"Unsupported format")
+        p=provenance; meta="".join(f"<li><b>{html.escape(str(k))}</b>: {html.escape(str(v))}</li>" for k,v in p.items()); body=f"<html><body><h1>MailRecon Report</h1><h2>Provenance</h2><ul>{meta}</ul><p>Target: {html.escape(inv.target)}</p><h2>Risk {inv.risk_score}/100 — {html.escape(str(inv.risk_level))}</h2><ul>"+"".join(f"<li><b>{html.escape(f.severity)}</b> {html.escape(f.finding_type)}: {html.escape(f.value)} ({f.confidence:.0%}; {html.escape(str(evidence_state(f)))}; {'current' if inv.execution_attempt_id and f.execution_attempt_id==inv.execution_attempt_id else 'historical'})</li>" for f in fs)+"</ul></body></html>"; return HTMLResponse(body)
+    if format=="pdf": return StreamingResponse(iter([pdf_report(inv,fs,provenance)]),media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="mailrecon-{inv_id}.pdf"'})
+    raise HTTPException(400,"Unsupported report format")
 
 @router.delete("/investigations/{inv_id}", dependencies=[Depends(require_api_key)])
-def delete_inv(inv_id:int,db:Session=Depends(get_db)):
-    try:
-        result=db.execute(delete(Investigation).where(Investigation.id==inv_id))
-        if result.rowcount != 1:
-            db.rollback()
-            raise HTTPException(404,"Investigation not found")
-        db.commit()
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception:
-        db.rollback()
-        raise
-    return {"id":inv_id,"status":"deleted"}
+def delete_investigation(inv_id:int,db:Session=Depends(get_db)):
+    inv=db.scalar(select(Investigation).where(Investigation.id==inv_id))
+    if not inv: raise HTTPException(404,"Investigation not found")
+    db.delete(inv); db.commit(); return {"id":inv_id,"status":"deleted"}
+
+@router.get("/investigations/{inv_id}/correlations", dependencies=[Depends(require_api_key)])
+def correlations(inv_id:int,db:Session=Depends(get_db)):
+    from app.osint.correlation import correlate
+    inv,fs,_=load(inv_id,db)
+    rows=[{"id":f.id,"source":f.source,"source_url":f.source_url,"finding_type":f.finding_type,"value":f.value,"confidence":f.confidence,"severity":f.severity,"notes":f.notes,"evidence_state":evidence_state(f)} for f in fs]
+    return correlate(inv.normalized_email or inv.target,inv.domain,rows)
