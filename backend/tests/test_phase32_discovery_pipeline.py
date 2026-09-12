@@ -1,5 +1,3 @@
-import pytest
-
 from app.osint.service_catalog import SERVICE_CATALOG, build_account_discovery_matrix
 from app.providers.registry import OPERATIONAL_STATES, PROVIDER_REGISTRY, provider_definitions
 
