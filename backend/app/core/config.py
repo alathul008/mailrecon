@@ -1,5 +1,8 @@
 from functools import lru_cache
+
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     app_name: str = "MailRecon"
@@ -14,7 +17,12 @@ class Settings(BaseSettings):
     enable_ollama: bool = False
     privacy_mode: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
-    api_key: str | None = None
+    # Keep the public environment variable stable while also accepting the
+    # conventional API_KEY name for backwards/CLI compatibility.
+    api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MAILRECON_API_KEY", "API_KEY"),
+    )
     max_concurrency: int = 8
     max_queue_depth: int = 100
     max_investigations_per_window: int = 10
@@ -23,6 +31,7 @@ class Settings(BaseSettings):
     execution_lease_seconds: int = 60
     worker_poll_interval_seconds: float = 0.5
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
 
 @lru_cache
 def get_settings() -> Settings:

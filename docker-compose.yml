@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
+      - mailrecon_data:/app/data
     read_only: true
     tmpfs:
       - /tmp
@@ -19,3 +19,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  mailrecon_data:
+    name: mailrecon_data
