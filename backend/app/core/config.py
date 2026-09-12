@@ -23,6 +23,11 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("MAILRECON_API_KEY", "API_KEY"),
     )
+    # Optional operator-controlled JSON search endpoint (for example a local
+    # SearXNG instance). No public search service is silently contacted when
+    # this is unset.
+    public_web_search_url: str | None = None
+    public_web_search_token: str | None = None
     max_concurrency: int = 8
     max_queue_depth: int = 100
     max_investigations_per_window: int = 10
