@@ -49,11 +49,17 @@ def test_protected_api_accepts_valid_bearer_key():
         with TestClient(app) as c:
             r=c.get('/api/providers', headers={'Authorization':'Bearer test-secret-key'})
             assert r.status_code == 200
-            assert {'DNS','RDAP','Gravatar','GitHub','Have I Been Pwned','Ollama'} <= {x['name'] for x in r.json()}
+            providers={x['name']:x for x in r.json()}
+            assert {'DNS','RDAP','Gravatar','GitHub','GitLab','Have I Been Pwned','Public Web','Ollama'} <= set(providers)
+            assert providers['GitLab']['supported'] is True
+            assert providers['GitLab']['account_discovery'] is True
+            assert providers['Public Web']['account_discovery'] is True
             catalog=c.get('/api/service-catalog', headers={'Authorization':'Bearer test-secret-key'})
             assert catalog.status_code == 200
             github=next(x for x in catalog.json() if x['service']=='GitHub')
             assert {'service','category','supported','provider','discovery_methods'} <= set(github)
+            gitlab=next(x for x in catalog.json() if x['service']=='GitLab')
+            assert gitlab['supported'] is True
     finally:
         settings.api_key=original
 

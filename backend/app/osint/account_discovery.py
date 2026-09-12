@@ -7,10 +7,7 @@ from typing import Any, Protocol
 
 from app.osint.email import analyze_email, username_candidates
 from app.providers.base import ProviderResult
-from app.providers.github import GitHubProvider
-from app.providers.gitlab import GitLabProvider
-from app.providers.gravatar import GravatarProvider
-from app.providers.hibp import HIBPProvider
+from app.providers.registry import ProviderDefinition, execute, provider_definitions
 
 PROVIDER_STATUS_LABELS = {"ok": "OK", "unconfigured": "UNCONFIGURED", "rate_limited": "RATE LIMITED", "unavailable": "UNAVAILABLE", "error": "ERROR", "disabled": "DISABLED"}
 
@@ -24,23 +21,20 @@ class AccountProvider(Protocol):
     name: str
     async def run(self, email: str, candidates: list[str]) -> ProviderResult: ...
 
-class _Adapter:
-    def __init__(self, provider: Any, *, candidates: bool = False):
-        self.provider = provider
-        self.name = provider.name
-        self._candidates = candidates
+class _RegistryAdapter:
+    def __init__(self, definition: ProviderDefinition):
+        self.definition = definition
+        self.name = definition.name
 
     async def run(self, email: str, candidates: list[str]) -> ProviderResult:
-        if self._candidates:
-            return await self.provider.run(candidates, email)
-        return await self.provider.run(email)
+        return await execute(self.definition, email=email, domain=analyze_email(email)["domain"], candidates=candidates)
 
 def normalize_target(email: str) -> DiscoveryTarget:
     analysis = analyze_email(email.strip())
     return DiscoveryTarget(email=analysis["email"], username=analysis["username"], domain=analysis["domain"])
 
 def default_providers() -> tuple[AccountProvider, ...]:
-    return (_Adapter(GravatarProvider()), _Adapter(GitHubProvider(), candidates=True), _Adapter(GitLabProvider()), _Adapter(HIBPProvider()))
+    return tuple(_RegistryAdapter(definition) for definition in provider_definitions(account_discovery=True))
 
 def _provider_status_result(provider: AccountProvider, status: str, message: str | None, checked_at: datetime) -> dict[str, Any]:
     return {"provider": provider.name, "status": PROVIDER_STATUS_LABELS.get(status, status.upper()), "status_code": status, "checked_at": checked_at, "message": message}

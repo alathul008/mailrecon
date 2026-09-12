@@ -7,6 +7,7 @@ from app.osint.email import (
     EVIDENCE_CORROBORATED,
     EVIDENCE_DERIVED,
     EVIDENCE_OBSERVED,
+    EVIDENCE_POSSIBLE,
     EVIDENCE_SOURCE_ASSOCIATED,
 )
 
@@ -116,7 +117,20 @@ def correlate_email_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
         value = f.get("value")
         if typ in {"profile_candidate", "profile", "public_identity", "username_candidate", "email", "provider_status", "risk_factor", "risk_dimension", "classification"}:
             continue
-        if typ in {"breach"}:
+        if typ == "public_web_reference":
+            state = _state(f) or EVIDENCE_POSSIBLE
+            confidence = min(0.55, max(0.0, float(f.get("confidence", 0.55))))
+            relationships.append(_rel(
+                target or "email",
+                str(value),
+                "public_web_observation",
+                state,
+                confidence,
+                [_id(f)],
+                "Public search returned a reference associated with the exact email or a derived candidate query.",
+                "Public search correlation is only a possible match and does not confirm account ownership or human identity.",
+            ))
+        elif typ in {"breach"}:
             relationships.append(_rel(target or "email", str(value), "historical_breach_exposure", EVIDENCE_OBSERVED, min(1.0, max(0.0, float(f.get("confidence", 0.0)))), [_id(f)], "Provider reported historical exposure for the target email.", "Historical exposure does not establish current compromise, password validity, or active exploitation."))
         elif typ in {"mx", "spf", "dmarc", "dnssec", "a", "aaaa", "ns", "cname", "domain_correlation"}:
             relationships.append(_rel(domain or "domain", str(value), "domain_observation", EVIDENCE_OBSERVED, min(1.0, max(0.0, float(f.get("confidence", 0.0)))), [_id(f)], "Public DNS or domain observation provides infrastructure context for the target domain.", "Shared infrastructure or provider relationships do not establish common ownership."))
@@ -150,5 +164,6 @@ def correlate_email_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
             "observed": "Direct public-source provider observation.",
             "correlated_inferred": "Relationship supported by multiple/linked observations; not identity confirmation.",
             "risk_interpretation": "Security significance remains separate from evidence and correlation.",
+            "public_web": "Public search references remain possible matches and do not confirm account ownership.",
         },
     }

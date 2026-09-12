@@ -12,15 +12,16 @@ from app.reports.render import pdf_report
 from app.core.auth import require_api_key
 from app.core.config import get_settings
 from app.core.rate_limit import allow_investigation_creation
+from app.providers.registry import configured_status, provider_definitions
 
 router=APIRouter(prefix="/api")
-TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach"}
+TIMELINE_FINDING_TYPES={"email","domain","domain_event","a","aaaa","mx","ns","cname","spf","dmarc","dnssec","profile_candidate","public_identity","profile","avatar","breach","public_web_reference"}
 
 def evidence_state(f):
     if f.evidence_state: return f.evidence_state
+    if isinstance(f.raw_reference,dict) and isinstance(f.raw_reference.get("evidence_state"),str): return f.raw_reference["evidence_state"]
     notes=f.notes or ""; marker="Evidence state: "
     if marker in notes: return notes.split(marker,1)[1].split(".",1)[0].strip()
-    if isinstance(f.raw_reference,dict) and isinstance(f.raw_reference.get("evidence_state"),str): return f.raw_reference["evidence_state"]
     return None
 
 def timeline_timestamp(f): return f.first_seen or f.collected_at
@@ -50,8 +51,7 @@ def health(): return {"status":"ok","service":"MailRecon"}
 
 @router.get("/providers", dependencies=[Depends(require_api_key)])
 def providers():
-    s=get_settings()
-    return [{"name":"DNS","status":"available","configuration":"none"},{"name":"RDAP","status":"available","configuration":"none"},{"name":"Gravatar","status":"available","configuration":"none"},{"name":"GitHub","status":"configured" if s.github_token else "available","configuration":"optional GITHUB_TOKEN"},{"name":"Have I Been Pwned","status":"configured" if s.hibp_api_key else "unconfigured","configuration":"optional HIBP_API_KEY"},{"name":"Ollama","status":"configured" if s.enable_ollama else "disabled","configuration":"optional local model"}]
+    return [{"name":item.name,"category":item.category,"status":configured_status(item),"configuration":item.configuration,"supported":item.supported,"discovery_methods":list(item.discovery_methods),"external_network":item.external_network,"account_discovery":item.account_discovery,"orchestrated":item.orchestrated} for item in provider_definitions()]
 
 @router.post("/investigations", dependencies=[Depends(require_api_key)])
 async def create(payload: InvestigationCreate, db: Session=Depends(get_db)):
