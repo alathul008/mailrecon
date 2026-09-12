@@ -36,6 +36,7 @@ def test_protected_api_rejects_missing_and_invalid_keys():
         with TestClient(app) as c:
             assert c.get('/api/providers').status_code == 401
             assert c.get('/api/providers', headers={'Authorization':'Bearer wrong-key'}).status_code == 401
+            assert c.get('/api/service-catalog').status_code == 401
     finally:
         settings.api_key=original
 
@@ -49,6 +50,10 @@ def test_protected_api_accepts_valid_bearer_key():
             r=c.get('/api/providers', headers={'Authorization':'Bearer test-secret-key'})
             assert r.status_code == 200
             assert {'DNS','RDAP','Gravatar','GitHub','Have I Been Pwned','Ollama'} <= {x['name'] for x in r.json()}
+            catalog=c.get('/api/service-catalog', headers={'Authorization':'Bearer test-secret-key'})
+            assert catalog.status_code == 200
+            github=next(x for x in catalog.json() if x['service']=='GitHub')
+            assert {'service','category','supported','provider','discovery_methods'} <= set(github)
     finally:
         settings.api_key=original
 
@@ -79,24 +84,8 @@ def test_timeline_requires_bearer_authentication():
 
 def test_module_projection_marks_only_authoritative_attempt_current():
     started = datetime(2026, 9, 9, 8, 0, tzinfo=timezone.utc)
-    abandoned = ModuleRun(
-        module="rdap",
-        status="abandoned",
-        execution_id="execution-1",
-        execution_attempt_id="attempt-a",
-        started_at=started,
-        finished_at=None,
-        message="historical attempt",
-    )
-    current = ModuleRun(
-        module="rdap",
-        status="running",
-        execution_id="execution-1",
-        execution_attempt_id="attempt-b",
-        started_at=started,
-        finished_at=None,
-        message="current attempt",
-    )
+    abandoned = ModuleRun(module="rdap",status="abandoned",execution_id="execution-1",execution_attempt_id="attempt-a",started_at=started,finished_at=None,message="historical attempt")
+    current = ModuleRun(module="rdap",status="running",execution_id="execution-1",execution_attempt_id="attempt-b",started_at=started,finished_at=None,message="current attempt")
     old_view = module_projection(abandoned, "attempt-b")
     current_view = module_projection(current, "attempt-b")
     assert old_view["status"] == "abandoned"
