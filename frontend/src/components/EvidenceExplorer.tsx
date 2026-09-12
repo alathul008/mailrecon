@@ -13,7 +13,7 @@ export function EvidenceExplorer({findings,onPivot,focusFindingId}:{findings:Fin
  const sources=useMemo(()=>Array.from(new Set(findings.map(f=>f.source))).sort(),[findings]); const types=useMemo(()=>Array.from(new Set(findings.map(f=>f.finding_type))).sort(),[findings]); const states=useMemo(()=>Array.from(new Set(findings.map(f=>f.evidence_state||'unknown'))).sort(),[findings]);
  const visible=useMemo(()=>filterFindings(findings,filters),[findings,filters]);
  const passive=useMemo(()=>findings.filter(f=>passiveTypes.has(f.finding_type)),[findings]);
- const observed=passive.filter(f=>f.evidence_state==='observed').length; const derived=passive.filter(f=>f.evidence_state==='derived').length; const operational=passive.filter(f=>f.finding_type==='provider_status').length;
+ const observed=passive.filter(f=>f.evidence_state==='observed').length; const derived=passive.filter(f=>f.evidence_state==='derived').length; const operational=findings.filter(f=>f.finding_type==='provider_status').length;
  useEffect(()=>{if(focusFindingId==null)return;const finding=findings.find(f=>f.id===focusFindingId);if(finding)setSelected(finding)},[focusFindingId,findings]);
  function set(name:keyof EvidenceFilters,value:string){setFilters(current=>({...current,[name]:value}))}
  return <div className="space-y-4">
