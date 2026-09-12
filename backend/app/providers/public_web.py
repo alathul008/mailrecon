@@ -4,6 +4,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.osint.email import EVIDENCE_POSSIBLE
+from app.osint.service_discovery import service_for_url, service_query_plan
 from app.providers.base import ProviderResult, finding
 from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
@@ -12,18 +13,15 @@ from app.providers.network import pinned_transport
 class PublicWebProvider:
     """Optional public-web search adapter for a JSON search endpoint.
 
-    The endpoint is intentionally operator-configured so MailRecon does not
-    silently depend on a commercial search service or scrape anti-bot pages.
-    SearXNG-compatible JSON responses are supported. Only public result
-    metadata is persisted; page bodies are never stored by this provider.
+    Search-index discovery is public-only. Provider-specific queries are
+    bounded and are never sent to login, recovery, or authenticated APIs.
+    Only public result metadata is returned; page bodies are never stored.
     """
 
     name = "Public Web"
 
-    def _queries(self, email: str, candidates: list[str]) -> list[str]:
-        queries = [f'"{email}"']
-        queries.extend(f'"{candidate}"' for candidate in candidates[:4])
-        return list(dict.fromkeys(queries))
+    def _queries(self, email: str, candidates: list[str]) -> list[tuple[str, str | None]]:
+        return service_query_plan(email, candidates)
 
     @staticmethod
     def _results(data: object) -> list[dict]:
@@ -59,7 +57,7 @@ class PublicWebProvider:
                 trust_env=False,
                 transport=pinned_transport(endpoint),
             ) as client:
-                for query in self._queries(email, candidates):
+                for query, requested_service in self._queries(email, candidates):
                     url = f"{endpoint}?q={quote_plus(query)}&format=json"
                     validate_provider_url(url)
                     response = await client.get(url)
@@ -75,6 +73,8 @@ class PublicWebProvider:
                         if not isinstance(result_url, str) or not result_url.startswith(("http://", "https://")):
                             continue
                         validate_provider_url(result_url)
+                        matched_service = service_for_url(result_url)
+                        service = matched_service.name if matched_service else requested_service
                         value = title.strip() if isinstance(title, str) and title.strip() else result_url
                         findings.append(
                             finding(
@@ -93,6 +93,8 @@ class PublicWebProvider:
                                     "url": result_url,
                                     "title": title,
                                     "source": item.get("engine") or item.get("source"),
+                                    "service": service,
+                                    "category": matched_service.category if matched_service else None,
                                     "evidence_state": EVIDENCE_POSSIBLE,
                                 },
                                 evidence_state=EVIDENCE_POSSIBLE,

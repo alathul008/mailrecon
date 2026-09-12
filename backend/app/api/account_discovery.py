@@ -16,6 +16,7 @@ def _finding_dict(f: Finding) -> dict:
         evidence_state = f.raw_reference.get("evidence_state")
     if not evidence_state and f.notes and "Evidence state: " in f.notes:
         evidence_state = f.notes.split("Evidence state: ", 1)[1].split(".", 1)[0].strip()
+    raw = f.raw_reference if isinstance(f.raw_reference, dict) else {}
     return {
         "id": f.id,
         "source": f.source,
@@ -24,6 +25,7 @@ def _finding_dict(f: Finding) -> dict:
         "value": f.value,
         "confidence": f.confidence,
         "evidence_state": evidence_state,
+        "service": raw.get("service") if isinstance(raw.get("service"), str) else None,
     }
 
 
@@ -59,6 +61,7 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
             "status": "operational_or_evidence_state",
             "identity": "correlation_does_not_confirm_identity",
             "negative_results": "no_public_evidence_is_not_account_nonexistence",
+            "public_web": "service labels are derived from public result domains; they are not provider account confirmation",
         },
         "services": rows,
     }
