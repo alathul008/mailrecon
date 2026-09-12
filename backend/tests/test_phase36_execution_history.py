@@ -17,23 +17,24 @@ def seed(tmp_path):
         inv = Investigation(target="alice@example.com", normalized_email="alice@example.com", username="alice", domain="example.com", status="completed", risk_score=55, risk_level="MEDIUM")
         other = Investigation(target="bob@example.com", normalized_email="bob@example.com", username="bob", domain="example.com", status="completed")
         db.add_all([inv, other]); db.commit(); db.refresh(inv); db.refresh(other)
-        a = ExecutionAttempt(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", status="abandoned", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc), finished_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc), recovered_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc), recovery_reason="worker lease expired")
-        b = ExecutionAttempt(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", status="completed", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc), finished_at=datetime(2026, 9, 2, 1, tzinfo=timezone.utc))
-        foreign = ExecutionAttempt(investigation_id=other.id, execution_id=other.execution_id, execution_attempt_id="attempt-foreign", status="completed", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc))
+        inv_id, other_id = inv.id, other.id
+        a = ExecutionAttempt(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", status="abandoned", started_at=datetime(2026, 9, 1, tzinfo=timezone.utc), finished_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc), recovered_at=datetime(2026, 9, 1, 1, tzinfo=timezone.utc), recovery_reason="worker lease expired")
+        b = ExecutionAttempt(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", status="completed", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc), finished_at=datetime(2026, 9, 2, 1, tzinfo=timezone.utc))
+        foreign = ExecutionAttempt(investigation_id=other_id, execution_id=other.execution_id, execution_attempt_id="attempt-foreign", status="completed", started_at=datetime(2026, 9, 2, tzinfo=timezone.utc))
         db.add_all([a, b, foreign]); db.flush(); inv.execution_attempt_id = "attempt-b"
         db.add_all([
-            Finding(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", source="GitHub", finding_type="profile_candidate", value="https://github.com/alice", confidence=.8, severity="info", notes="Evidence state: possible_match."),
-            Finding(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", source="Risk", finding_type="risk_dimension", value="identity_exposure=4", confidence=1, severity="info"),
-            Finding(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", source="GitHub", finding_type="provider_status", value="rate_limited", confidence=1, severity="warning", notes="provider limit"),
-            Finding(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", source="Risk", finding_type="risk_dimension", value="identity_exposure=6", confidence=1, severity="info"),
-            Finding(investigation_id=other.id, execution_id=other.execution_id, execution_attempt_id="attempt-foreign", source="SecretSource", finding_type="secret", value="never-return-this", confidence=1, severity="high", raw_reference={"Authorization": "Bearer super-secret"}),
+            Finding(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", source="GitHub", finding_type="profile_candidate", value="https://github.com/alice", confidence=.8, severity="info", notes="Evidence state: possible_match."),
+            Finding(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", source="Risk", finding_type="risk_dimension", value="identity_exposure=4", confidence=1, severity="info"),
+            Finding(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", source="GitHub", finding_type="provider_status", value="rate_limited", confidence=1, severity="warning", notes="provider limit"),
+            Finding(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", source="Risk", finding_type="risk_dimension", value="identity_exposure=6", confidence=1, severity="info"),
+            Finding(investigation_id=other_id, execution_id=other.execution_id, execution_attempt_id="attempt-foreign", source="SecretSource", finding_type="secret", value="never-return-this", confidence=1, severity="high", raw_reference={"Authorization": "Bearer super-secret"}),
         ])
         db.add_all([
-            ModuleRun(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", module="github", status="abandoned", message="worker lease expired"),
-            ModuleRun(investigation_id=inv.id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", module="github", status="completed", message="ok"),
+            ModuleRun(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-a", module="github", status="abandoned", message="worker lease expired"),
+            ModuleRun(investigation_id=inv_id, execution_id=inv.execution_id, execution_attempt_id="attempt-b", module="github", status="completed", message="ok"),
         ])
         db.commit()
-    return engine, inv.id, other.id
+    return engine, inv_id, other_id
 
 
 def client_for(engine):
@@ -75,7 +76,7 @@ def test_attempt_detail_is_attempt_scoped_and_does_not_expose_raw_reference(tmp_
 
 
 def test_comparison_is_same_investigation_only_deterministic_and_failure_is_not_removal(tmp_path):
-    engine, inv_id, other_id = seed(tmp_path); client, settings, original = client_for(engine)
+    engine, inv_id, _ = seed(tmp_path); client, settings, original = client_for(engine)
     try:
         headers = {"Authorization": "Bearer phase36-test-key"}
         url = f"/api/investigations/{inv_id}/attempt-comparison?before_attempt_id=attempt-a&after_attempt_id=attempt-b"
