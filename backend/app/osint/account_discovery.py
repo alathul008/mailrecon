@@ -36,7 +36,7 @@ class _Adapter:
         return await self.provider.run(email)
 
 def normalize_target(email: str) -> DiscoveryTarget:
-    analysis = analyze_email(email)
+    analysis = analyze_email(email.strip())
     return DiscoveryTarget(email=analysis["email"], username=analysis["username"], domain=analysis["domain"])
 
 def default_providers() -> tuple[AccountProvider, ...]:
