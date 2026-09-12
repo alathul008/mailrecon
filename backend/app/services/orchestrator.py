@@ -10,7 +10,7 @@ from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
 from app.osint.dns import resolve, record_presence
 from app.providers.ollama import OllamaProvider
-from app.providers.base import ProviderResult, finding
+from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.github import GitHubProvider
 from app.providers.gitlab import GitLabProvider
 from app.providers.gravatar import GravatarProvider
@@ -25,6 +25,17 @@ PROVIDER_DEFINITIONS = provider_definitions(orchestrated=True)
 MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","gitlab","public_web","breach_sources","risk_calculation","graph_build"]
 DERIVED_USERNAME_RELATION = "derived_username"
 MODULE_TRANSITIONS = {"queued": {"queued", "running", "completed", "skipped", "abandoned"}, "running": {"running", "completed", "failed", "skipped", "abandoned"}, "completed": {"completed"}, "failed": {"failed"}, "skipped": {"skipped"}, "abandoned": {"abandoned"}}
+
+# Explicit construction hooks keep existing monkeypatch-based tests possible without
+# resolving provider classes through dynamic global symbol lookup.
+PROVIDER_FACTORY_RESOLVERS = {
+    "Gravatar": lambda: GravatarProvider(),
+    "RDAP": lambda: RDAPProvider(),
+    "GitHub": lambda: GitHubProvider(),
+    "GitLab": lambda: GitLabProvider(),
+    "Have I Been Pwned": lambda: HIBPProvider(),
+    "Public Web": lambda: PublicWebProvider(),
+}
 
 def utcnow(): return datetime.now(timezone.utc)
 def _require_ownership(db, inv_id, token):
@@ -109,8 +120,9 @@ def _provider_tasks_outcome(tasks):
     return [task.result() if not task.cancelled() else ProviderOwnershipLost("Provider work cancelled after execution ownership was lost") for task in tasks]
 
 async def _run_provider_call(definition,email,domain,candidates):
-    factory = globals().get(definition.factory_symbol) if definition.factory_symbol else None
-    return await execute(definition,email=email,domain=domain,candidates=candidates,factory=factory)
+    context=ProviderContext(email=email,domain=domain,candidates=tuple(candidates))
+    factory=PROVIDER_FACTORY_RESOLVERS.get(definition.name)
+    return await execute(definition,context=context,factory=factory)
 
 async def run_providers(email: str,domain: str,candidates: list[str],*,inv_id:int|None=None,token:str|None=None,allow_external: bool=True):
     definitions=tuple(item for item in PROVIDER_DEFINITIONS if item.factory is not None)
