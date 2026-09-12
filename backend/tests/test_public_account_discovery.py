@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from app.osint.account_discovery import default_providers, discover_public_accounts, normalize_target
 from app.osint.service_catalog import build_account_discovery_matrix
-from app.providers.base import ProviderResult, finding
+from app.providers.base import ProviderResult, ProviderContext, finding
 
 
 class FakeProvider:
@@ -12,7 +12,7 @@ class FakeProvider:
         self.result = result
         self.exc = exc
 
-    async def run(self, email, candidates=None):
+    async def run(self, context: ProviderContext):
         if self.exc:
             raise self.exc
         return self.result
