@@ -9,6 +9,8 @@ from app.services import lifecycle
 from app.services.orchestrator import add_findings
 from app.api.routes import graph, report, risk, timeline
 
+# Phase 34 regression coverage keeps historical findings while isolating current projections.
+
 
 def make_engine(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'phase34.db'}")
