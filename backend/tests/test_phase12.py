@@ -112,7 +112,8 @@ async def test_public_provider_transport_validates_at_connection_boundary(monkey
     assert calls == []
 
 
-def test_public_provider_transport_rejects_unsafe_scheme_or_userinfo():
+@pytest.mark.asyncio
+async def test_public_provider_transport_rejects_unsafe_scheme_or_userinfo():
     with pytest.raises(ValueError): network.pinned_transport("http://example.com/")
     with pytest.raises(ValueError): network.pinned_transport("https://user:pass@example.com/")
 
@@ -120,7 +121,7 @@ def test_public_provider_transport_rejects_unsafe_scheme_or_userinfo():
 @pytest.mark.asyncio
 async def test_external_provider_disclosure_false_returns_explicit_disabled_results():
     results = await orchestrator.run_providers("user@example.com", "example.com", ["user"], allow_external=False)
-    assert [r.status for r in results] == ["disabled", "disabled", "disabled", "disabled"]
+    assert [r.status for r in results] == ["disabled", "disabled", "disabled", "disabled", "disabled"]
     assert all("disclosure disabled" in (r.message or "") for r in results)
 
 
