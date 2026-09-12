@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Callable, Protocol
 
 from app.core.config import get_settings
 from app.providers.base import ProviderContext, ProviderResult
@@ -37,6 +37,10 @@ class ProviderDefinition:
     argument_mode: str = "email"
     module: str | None = None
 
+    @property
+    def executable(self) -> bool:
+        return self.factory is not None
+
 
 PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
     ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar"),
@@ -45,6 +49,7 @@ PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
     ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab"),
     ProviderDefinition("Have I Been Pwned", "Other", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources"),
     ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web"),
+    # DNS is an orchestrator-owned local module, not an executable ProviderRunner.
     ProviderDefinition("DNS", "Network", True, ("dns_resolution",), "none", True, False, True),
     ProviderDefinition("Ollama", "Local AI", True, ("local_model_api",), "optional local model", False, False, False),
 )
@@ -119,8 +124,8 @@ def validate_registry() -> None:
             raise ValueError(f"Provider {item.name} has unsupported invocation mode")
         if item.account_discovery and not item.supported:
             raise ValueError(f"Account-discovery provider {item.name} must be supported")
-        if item.orchestrated and item.factory is None:
-            raise ValueError(f"Orchestrated provider {item.name} has no executable factory")
+        if item.account_discovery and item.factory is None:
+            raise ValueError(f"Account-discovery provider {item.name} has no executable factory")
         if item.factory is not None and not callable(item.factory):
             raise ValueError(f"Provider {item.name} factory is not callable")
 
