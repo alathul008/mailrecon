@@ -65,6 +65,7 @@ def test_completed_historical_attempt_is_never_rewritten(tmp_path):
         claim_investigation(db, inv.id, now=t0)
         first = db.get(Investigation, inv.id)
         attempt_a = first.execution_attempt_id
+        execution_id = first.execution_id
         finish_execution_attempt(db, inv.id, attempt_a, "completed", now=t0 + timedelta(seconds=2))
         db.commit()
         first.status = "queued"; first.execution_token = None; first.execution_heartbeat_at = None; db.commit()
@@ -121,7 +122,7 @@ async def test_public_provider_transport_rejects_unsafe_scheme_or_userinfo():
 @pytest.mark.asyncio
 async def test_external_provider_disclosure_false_returns_explicit_disabled_results():
     results = await orchestrator.run_providers("user@example.com", "example.com", ["user"], allow_external=False)
-    assert [r.status for r in results] == ["disabled", "disabled", "disabled", "disabled", "disabled"]
+    assert [r.status for r in results] == ["disabled"] * 6
     assert all("disclosure disabled" in (r.message or "") for r in results)
 
 
