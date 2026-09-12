@@ -116,7 +116,7 @@ async def test_registry_operational_failures_never_become_negative_evidence(stat
         return ProviderResult("Public Web", status)
 
     class FakeProvider:
-        run = run
+        run = staticmethod(run)
 
     definition = registry.provider_definition("Public Web")
     result = await registry.execute(definition, context=CONTEXT, factory=FakeProvider)
