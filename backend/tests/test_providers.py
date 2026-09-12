@@ -350,7 +350,7 @@ async def test_rdap_ssrf_validation_failure_is_provider_error(monkeypatch):
 
 def test_ollama_endpoint_policy_accepts_localhost_and_explicit_private_host():
     assert validate_ollama_url("http://127.0.0.1:11434", "localhost,127.0.0.1,::1") == "http://127.0.0.1:11434"
-    assert validate_ollama_url("http://192.168.1.50:11434", "localhost,127.0.0.1,::1") == "http://192.168.1.50:11434"
+    assert validate_ollama_url("http://192.168.1.50:11434", "localhost,127.0.0.1,::1,192.168.1.50") == "http://192.168.1.50:11434"
     assert validate_ollama_url("https://ollama.internal:11434", "ollama.internal") == "https://ollama.internal:11434"
 
 
