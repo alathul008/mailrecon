@@ -127,11 +127,12 @@ async def _run_provider_call(definition,email,domain,candidates,*,investigation_
         context=ProviderContext(email=email,domain=domain,candidates=tuple(candidates))
         factory=PROVIDER_FACTORY_RESOLVERS.get(definition.name)
         result=await execute(definition,context=context,factory=factory)
-        logger.info("provider_execution",extra={"investigation_id":investigation_id,"execution_attempt_id":execution_attempt_id,"module":module,"provider":provider,"started_at":started_at.isoformat(),"finished_at":utcnow().isoformat(),"duration_ms":int((utcnow()-started_at).total_seconds()*1000),"operational_status":result.status,"error_class":None})
+        finished_at=utcnow()
+        logger.info("provider_execution",extra={"mailrecon_telemetry":{"investigation_id":investigation_id,"execution_attempt_id":execution_attempt_id,"module":module,"provider":provider,"started_at":started_at.isoformat(),"finished_at":finished_at.isoformat(),"duration_ms":int((finished_at-started_at).total_seconds()*1000),"operational_status":result.status,"error_class":None}})
         return result
     except Exception as exc:
         finished_at=utcnow()
-        logger.warning("provider_execution_failed",extra={"investigation_id":investigation_id,"execution_attempt_id":execution_attempt_id,"module":module,"provider":provider,"started_at":started_at.isoformat(),"finished_at":finished_at.isoformat(),"duration_ms":int((finished_at-started_at).total_seconds()*1000),"operational_status":"error","error_class":type(exc).__name__})
+        logger.warning("provider_execution_failed",extra={"mailrecon_telemetry":{"investigation_id":investigation_id,"execution_attempt_id":execution_attempt_id,"module":module,"provider":provider,"started_at":started_at.isoformat(),"finished_at":finished_at.isoformat(),"duration_ms":int((finished_at-started_at).total_seconds()*1000),"operational_status":"error","error_class":type(exc).__name__}})
         raise
 
 def _estimated_external_requests(provider_count,candidate_count):
