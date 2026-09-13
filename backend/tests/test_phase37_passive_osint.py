@@ -165,9 +165,10 @@ def test_durable_execution_path_preserves_attempt_and_operational_failure(monkey
 
     with Session(engine) as db:
         asyncio.run(orchestrator.run_investigation(inv_id, "token"))
+        db.expire_all()
         inv = db.get(Investigation, inv_id)
         findings = db.scalars(select(Finding).where(Finding.investigation_id == inv_id)).all()
-        assert inv.status == "completed"
+        assert inv.status == "completed_with_warnings"
         assert {f.execution_attempt_id for f in findings} == {"attempt-1"}
         assert any(f.finding_type == "provider_status" and f.value == "rate_limited" for f in findings)
         assert not any(f.finding_type == "account_absent" for f in findings)
