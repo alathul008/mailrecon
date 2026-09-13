@@ -11,7 +11,8 @@ from app.osint import dns as dns_osint
 from app.providers.base import ProviderResult
 from app.providers.public_web import PublicWebProvider
 from app.providers.rdap import RDAPProvider
-from app.services import orchestrator
+from app.services import lifecycle, orchestrator
+from app.services.execution_outcome import aggregate_execution_outcome
 from app.services.resource_budget import ExecutionResourceBudget
 
 
@@ -139,12 +140,13 @@ def test_durable_execution_path_preserves_attempt_and_operational_failure(monkey
     engine = create_engine(f"sqlite:///{tmp_path / 'phase37-e2e.db'}")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
-        inv = Investigation(target="alice@example.com", normalized_email="alice@example.com", username="alice", domain="example.com", status="running", execution_token="token", execution_attempt_id="attempt-1", execution_id="execution-1")
-        db.add(inv); db.flush()
-        db.add(ExecutionAttempt(investigation_id=inv.id, execution_id="execution-1", execution_attempt_id="attempt-1", status="running", started_at=datetime.now(timezone.utc)))
+        inv = Investigation(target="alice@example.com", normalized_email="alice@example.com", username="alice", domain="example.com", status="queued")
+        db.add(inv); db.commit(); inv_id = inv.id
+        token = lifecycle.claim_investigation(db, inv_id)
+        current = db.get(Investigation, inv_id)
         for module in orchestrator.MODULES:
-            db.add(ModuleRun(investigation_id=inv.id, execution_id="execution-1", execution_attempt_id="attempt-1", module=module, status="queued"))
-        db.commit(); inv_id = inv.id
+            db.add(ModuleRun(investigation_id=inv_id, execution_id=current.execution_id, execution_attempt_id=current.execution_attempt_id, module=module, status="queued"))
+        db.commit()
 
     fake_dns = {
         "A": ["192.0.2.10"], "AAAA": [], "MX": ["10 mx.example.test."], "NS": [], "CNAME": [], "SPF": [], "SPF_status": "no_result", "SPF_analysis": {"present": False, "mechanisms": [], "includes": [], "qualifiers": [], "policy": None},
@@ -164,11 +166,15 @@ def test_durable_execution_path_preserves_attempt_and_operational_failure(monkey
     monkeypatch.setattr(orchestrator.OllamaProvider, "summarize", lambda self, target, findings: asyncio.sleep(0, result=None))
 
     with Session(engine) as db:
-        asyncio.run(orchestrator.run_investigation(inv_id, "token"))
+        asyncio.run(orchestrator.run_investigation(inv_id, token))
         db.expire_all()
         inv = db.get(Investigation, inv_id)
+        attempt = db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.investigation_id == inv_id, ExecutionAttempt.execution_attempt_id == inv.execution_attempt_id))
         findings = db.scalars(select(Finding).where(Finding.investigation_id == inv_id)).all()
-        assert inv.status == "completed_with_warnings"
-        assert {f.execution_attempt_id for f in findings} == {"attempt-1"}
+        provider_statuses = [f.value for f in findings if f.finding_type == "provider_status"]
+        assert inv.status == "completed"
+        assert attempt.status == "completed"
+        assert aggregate_execution_outcome(inv, attempt, db.scalars(select(ModuleRun).where(ModuleRun.investigation_id == inv_id, ModuleRun.execution_attempt_id == attempt.execution_attempt_id)).all(), provider_statuses) == "completed_with_warnings"
+        assert {f.execution_attempt_id for f in findings} == {attempt.execution_attempt_id}
         assert any(f.finding_type == "provider_status" and f.value == "rate_limited" for f in findings)
         assert not any(f.finding_type == "account_absent" for f in findings)
