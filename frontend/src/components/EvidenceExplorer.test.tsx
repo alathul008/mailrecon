@@ -6,7 +6,6 @@ import type {Finding} from '../types';
 const finding=(overrides:Partial<Finding>):Finding=>({
  id:1,
  source:'DNS',
- source_url:null,
  finding_type:'spf_policy',
  value:'{"present":true}',
  confidence:.99,
