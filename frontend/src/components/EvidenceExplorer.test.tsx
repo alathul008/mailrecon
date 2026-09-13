@@ -14,7 +14,6 @@ const finding=(overrides:Partial<Finding>):Finding=>({
  execution_id:'execution-1',
  execution_attempt_id:'attempt-1',
  current_attempt:true,
- historical_attempt:false,
  collected_at:'2026-09-12T00:00:00Z',
  first_seen:null,
  last_seen:null,
