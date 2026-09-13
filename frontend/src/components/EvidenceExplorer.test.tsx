@@ -15,8 +15,6 @@ const finding=(overrides:Partial<Finding>):Finding=>({
  execution_attempt_id:'attempt-1',
  current_attempt:true,
  collected_at:'2026-09-12T00:00:00Z',
- first_seen:null,
- last_seen:null,
  notes:'Normalized passive evidence',
  ...overrides,
 });
