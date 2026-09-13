@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.session import Base
 from app.models import ExecutionAttempt, Finding, Investigation, ModuleRun
@@ -139,6 +139,9 @@ def test_public_web_normalization_is_deterministic_and_bounded(monkeypatch):
 def test_durable_execution_path_preserves_attempt_and_operational_failure(monkeypatch, tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'phase37-e2e.db'}")
     Base.metadata.create_all(engine)
+    test_session_local = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
+    monkeypatch.setattr(orchestrator, "SessionLocal", test_session_local)
+
     with Session(engine) as db:
         inv = Investigation(target="alice@example.com", normalized_email="alice@example.com", username="alice", domain="example.com", status="queued")
         db.add(inv); db.commit(); inv_id = inv.id
