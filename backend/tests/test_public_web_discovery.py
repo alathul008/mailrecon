@@ -21,11 +21,11 @@ def test_public_web_query_plan_is_bounded_and_exact_email_first():
     context = ProviderContext(email="target@example.com", domain="example.com", candidates=("target", "target_dev", "third", "fourth", "fifth"))
     queries = PublicWebProvider()._queries(context)
     assert queries == [
-        '"target@example.com"',
-        '"target"',
-        '"target_dev"',
-        '"third"',
-        '"fourth"',
+        ('"target@example.com"', "exact_email"),
+        ('"target"', "derived_username"),
+        ('"target_dev"', "derived_username"),
+        ('"third"', "derived_username"),
+        ('"fourth"', "derived_username"),
     ]
 
 
