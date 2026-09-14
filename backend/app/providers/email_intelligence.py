@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from urllib.parse import quote
 
 import httpx
@@ -17,7 +16,7 @@ class EmailIntelligenceProvider:
 
     name = "Email Intelligence"
 
-    async def _get_json(self, url: str, headers: dict[str, str]) -> tuple[object | None, ProviderResult | None]:
+    async def _get_json(self, url: str, headers: dict[str, str], *, not_found_ok: bool = False) -> tuple[object | None, ProviderResult | None]:
         settings = get_settings()
         validate_provider_url(url)
         async with httpx.AsyncClient(
@@ -28,6 +27,8 @@ class EmailIntelligenceProvider:
             transport=pinned_transport(url),
         ) as client:
             response = await bounded_get(client, url)
+        if not_found_ok and response.status_code == 404:
+            return {}, None
         failure = classify_response(self.name, response)
         if failure:
             return None, failure
@@ -111,7 +112,11 @@ class EmailIntelligenceProvider:
                 messages.append("EmailRep returned an unexpected response shape")
 
             xon_url = f"https://api.xposedornot.com/v1/check-email/{quote(context.email, safe='')}"
-            xon, xon_failure = await self._get_json(xon_url, {"accept": "application/json", "user-agent": "MailRecon/1.1 breach intelligence"})
+            xon, xon_failure = await self._get_json(
+                xon_url,
+                {"accept": "application/json", "user-agent": "MailRecon/1.1 breach intelligence"},
+                not_found_ok=True,
+            )
             if xon_failure:
                 messages.append(f"XposedOrNot: {xon_failure.message or xon_failure.status}")
             elif isinstance(xon, dict):
