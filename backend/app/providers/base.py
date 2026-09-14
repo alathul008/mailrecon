@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-PROVIDER_STATUSES = {"ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled"}
+PROVIDER_STATUSES = {"ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled", "resource_limited"}
 
 
 @dataclass(frozen=True)
