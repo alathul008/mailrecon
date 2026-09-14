@@ -1,5 +1,4 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
@@ -149,30 +148,23 @@ def test_dns_resource_limit_is_inconclusive_not_negative_evidence():
 
 
 def test_infrastructure_http_counts_once_across_both_runtime_dimensions(monkeypatch):
-    class FakeClient:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
+    calls = 0
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-    async def fake_bounded_get(client, url, **kwargs):
-        assert kwargs["infrastructure"] is True
+    def handler(request):
+        nonlocal calls
+        calls += 1
         return httpx.Response(200, json={"handle": "AS15169", "name": "Example"})
 
     monkeypatch.setattr(dns, "validate_provider_url", lambda url: url)
     monkeypatch.setattr(dns, "pinned_transport", lambda url: None)
-    monkeypatch.setattr(dns.httpx, "AsyncClient", FakeClient)
-    monkeypatch.setattr(dns, "bounded_get", fake_bounded_get)
+    monkeypatch.setattr(dns.httpx, "AsyncClient", lambda **kwargs: _mock_client(handler))
 
     async def run():
         accounting = ExecutionResourceBudget(max_external_requests=1, max_infrastructure_http_requests=1).accounting()
         with bind_accounting(accounting):
             result = await dns._ip_context("8.8.8.8")
         assert result["status"] == "ok"
+        assert calls == 1
         assert accounting.external_requests == 1
         assert accounting.infrastructure_http_requests == 1
 
@@ -182,32 +174,79 @@ def test_infrastructure_http_counts_once_across_both_runtime_dimensions(monkeypa
 def test_infrastructure_budget_failure_is_fail_closed_without_network(monkeypatch):
     calls = 0
 
-    class FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-    async def should_not_run(*args, **kwargs):
+    def handler(request):
         nonlocal calls
         calls += 1
-        raise AssertionError("HTTP operation must not run after infrastructure budget exhaustion")
+        return httpx.Response(200, json={"handle": "AS15169", "name": "Example"})
 
     monkeypatch.setattr(dns, "validate_provider_url", lambda url: url)
     monkeypatch.setattr(dns, "pinned_transport", lambda url: None)
-    monkeypatch.setattr(dns.httpx, "AsyncClient", lambda **kwargs: FakeClient())
-    monkeypatch.setattr(dns, "bounded_get", should_not_run)
+    monkeypatch.setattr(dns.httpx, "AsyncClient", lambda **kwargs: _mock_client(handler))
 
     async def run():
         budget = ExecutionResourceBudget(max_external_requests=2, max_infrastructure_http_requests=1)
         accounting = budget.accounting()
-        accounting.reserve_infrastructure_http_request()
         with bind_accounting(accounting):
-            result = await dns._ip_context("8.8.8.8")
-        assert result["status"] == "resource_limited"
-        assert calls == 0
+            first = await dns._ip_context("8.8.8.8")
+            second = await dns._ip_context("1.1.1.1")
+        assert first["status"] == "ok"
+        assert second["status"] == "resource_limited"
+        assert calls == 1
+        assert accounting.external_requests == 1
+        assert accounting.infrastructure_http_requests == 1
+
+    asyncio.run(run())
+
+
+def test_two_infrastructure_requests_and_third_are_accounted_once_and_fail_closed(monkeypatch):
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"handle": "AS15169", "name": "Example"})
+
+    monkeypatch.setattr(dns, "validate_provider_url", lambda url: url)
+    monkeypatch.setattr(dns, "pinned_transport", lambda url: None)
+    monkeypatch.setattr(dns.httpx, "AsyncClient", lambda **kwargs: _mock_client(handler))
+
+    async def run():
+        accounting = ExecutionResourceBudget(max_external_requests=3, max_infrastructure_http_requests=2).accounting()
+        with bind_accounting(accounting):
+            first = await dns._ip_context("8.8.8.8")
+            second = await dns._ip_context("1.1.1.1")
+            third = await dns._ip_context("9.9.9.9")
+        assert first["status"] == "ok"
+        assert second["status"] == "ok"
+        assert third["status"] == "resource_limited"
+        assert calls == 2
         assert accounting.external_requests == 2
+        assert accounting.infrastructure_http_requests == 2
+
+    asyncio.run(run())
+
+
+def test_shared_external_budget_blocks_infrastructure_before_transport(monkeypatch):
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"handle": "AS15169", "name": "Example"})
+
+    monkeypatch.setattr(dns, "validate_provider_url", lambda url: url)
+    monkeypatch.setattr(dns, "pinned_transport", lambda url: None)
+    monkeypatch.setattr(dns.httpx, "AsyncClient", lambda **kwargs: _mock_client(handler))
+
+    async def run():
+        accounting = ExecutionResourceBudget(max_external_requests=1, max_infrastructure_http_requests=2).accounting()
+        with bind_accounting(accounting):
+            first = await dns._ip_context("8.8.8.8")
+            second = await dns._ip_context("1.1.1.1")
+        assert first["status"] == "ok"
+        assert second["status"] == "resource_limited"
+        assert calls == 1
+        assert accounting.external_requests == 1
         assert accounting.infrastructure_http_requests == 1
 
     asyncio.run(run())
