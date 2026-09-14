@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/mailrecon.db"
     hibp_api_key: str | None = None
     hibp_user_agent: str = "MailRecon/0.1 (local OSINT tool)"
+    emailrep_api_key: str | None = None
     github_token: str | None = None
     gitlab_token: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
