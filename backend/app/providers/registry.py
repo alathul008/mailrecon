@@ -47,7 +47,7 @@ class ProviderDefinition:
 
 
 PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
-    ProviderDefinition("Email Intelligence", "Identity & Exposure", True, ("email_reputation", "email_to_profile", "breach_metadata_api"), "optional EMAILREP_API_KEY", True, True, True, EmailIntelligenceProvider, "email", "email_intelligence", 120),
+    ProviderDefinition("Email Intelligence", "Identity & Exposure", True, ("email_reputation", "email_to_profile", "breach_metadata_api"), "optional EMAILREP_API_KEY", True, True, False, EmailIntelligenceProvider, "email", "email_intelligence", 120),
     ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar", 10),
     ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap", 50),
     ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery", 4),
