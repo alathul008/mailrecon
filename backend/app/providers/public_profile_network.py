@@ -13,17 +13,10 @@ from app.providers.network import pinned_transport
 
 
 class PublicProfileNetworkProvider:
-    """Passive username discovery across public profile pages and APIs.
-
-    This provider deliberately avoids signup, login, password-reset, contact-import,
-    CAPTCHA and authenticated checks. A public profile hit is a POSSIBLE correlation
-    unless a separate source associates the exact email with that profile.
-    """
+    """Passive username discovery across public profile pages and APIs."""
 
     name = "Public Profile Network"
 
-    # High-value public profile surfaces. These are direct public pages/APIs, not
-    # account-enumeration endpoints. The list is intentionally bounded for local use.
     _SITES = (
         ("GitHub", "Developer", "https://github.com/{u}"),
         ("GitLab", "Developer", "https://gitlab.com/{u}"),
@@ -69,10 +62,7 @@ class PublicProfileNetworkProvider:
         try:
             async with httpx.AsyncClient(
                 timeout=settings.request_timeout_seconds,
-                headers={
-                    "accept": "text/html,application/xhtml+xml",
-                    "user-agent": "MailRecon/1.3 passive public-profile discovery",
-                },
+                headers={"accept": "text/html,application/xhtml+xml", "user-agent": "MailRecon/1.3 passive public-profile discovery"},
                 follow_redirects=False,
                 trust_env=False,
                 transport=pinned_transport(url),
@@ -89,7 +79,7 @@ class PublicProfileNetworkProvider:
         except Exception as exc:
             return "error", f"{service}: {type(exc).__name__}"
 
-    async def _api_probe(self, service: str, url: str) -> tuple[str, dict | None, str | None]:
+    async def _json_probe(self, service: str, url: str, *, params: dict[str, str] | None = None) -> tuple[str, dict | None, str | None]:
         settings = get_settings()
         validate_provider_url(url)
         try:
@@ -100,7 +90,7 @@ class PublicProfileNetworkProvider:
                 trust_env=False,
                 transport=pinned_transport(url),
             ) as client:
-                response = await bounded_get(client, url)
+                response = await bounded_get(client, url, params=params)
             if response.status_code == 404:
                 return "not_found", None, None
             failure = classify_response(self.name, response)
@@ -116,20 +106,22 @@ class PublicProfileNetworkProvider:
     async def _probe(self, service: str, category: str, template: str, username: str):
         encoded = quote(username, safe="")
         url = template.format(u=encoded)
-        # JSON-backed public profiles give stronger service-side evidence.
         api_map = {
             "Dev.to": f"https://dev.to/api/users/{encoded}",
             "Codeberg": f"https://codeberg.org/api/v1/users/{encoded}",
             "Hugging Face": f"https://huggingface.co/api/users/{encoded}",
-            "Keybase": "https://keybase.io/_/api/1.0/user/lookup.json",
         }
         if service in api_map:
-            if service == "Keybase":
-                status, data, message = await self._api_probe(service, api_map[service] + f"?usernames={quote(username, safe='')}&fields=basics,profile,proofs_summary")
-                if status == "found" and isinstance(data, dict) and not data.get("them"):
-                    status = "not_found"
-            else:
-                status, data, message = await self._api_probe(service, api_map[service])
+            status, data, message = await self._json_probe(service, api_map[service])
+            return service, category, status, url, data, message
+        if service == "Keybase":
+            status, data, message = await self._json_probe(
+                service,
+                "https://keybase.io/_/api/1.0/user/lookup.json",
+                params={"usernames": username, "fields": "basics,profile,proofs_summary"},
+            )
+            if status == "found" and isinstance(data, dict) and not data.get("them"):
+                status = "not_found"
             return service, category, status, url, data, message
         status, message = await self._page_probe(service, url)
         return service, category, status, url, None, message
@@ -138,7 +130,6 @@ class PublicProfileNetworkProvider:
         username = (context.candidates[0] if context.candidates else context.email.split("@", 1)[0]).strip()
         if not username:
             return ProviderResult(self.name, "unavailable", message="No derived username was available")
-
         results = await asyncio.gather(*(self._probe(*site, username) for site in self._SITES))
         findings: list[dict] = []
         found = 0
@@ -159,49 +150,14 @@ class PublicProfileNetworkProvider:
                         0.72,
                         "info",
                         profile_url,
-                        notes=(
-                            f"Evidence state: {EVIDENCE_OBSERVED}. Public {service} profile was observed for the derived username. "
-                            "The email-to-profile relationship remains a possible correlation and is not identity confirmation."
-                        ),
-                        raw_reference={
-                            "service": service,
-                            "category": category,
-                            "username": username,
-                            "profile": details,
-                            "evidence_state": EVIDENCE_OBSERVED,
-                        },
+                        notes=f"Evidence state: {EVIDENCE_OBSERVED}. Public {service} profile was observed for the derived username. The email-to-profile relationship remains a possible correlation and is not identity confirmation.",
+                        raw_reference={"service": service, "category": category, "username": username, "profile": details, "evidence_state": EVIDENCE_OBSERVED},
                     )
                 )
             elif status in {"error", "rate_limited", "unavailable"}:
                 unavailable += 1
-                findings.append(
-                    finding(
-                        self.name,
-                        "service_status",
-                        f"{service}:{status}",
-                        1.0,
-                        "warning",
-                        profile_url,
-                        notes=message or f"{service} could not be checked.",
-                    )
-                )
+                findings.append(finding(self.name, "service_status", f"{service}:{status}", 1.0, "warning", profile_url, notes=message or f"{service} could not be checked."))
             else:
-                findings.append(
-                    finding(
-                        self.name,
-                        "service_status",
-                        f"{service}:no_public_evidence",
-                        1.0,
-                        "info",
-                        profile_url,
-                        notes=f"No public {service} profile was observed for the derived username. This is not proof that no account exists.",
-                    )
-                )
-
+                findings.append(finding(self.name, "service_status", f"{service}:no_public_evidence", 1.0, "info", profile_url, notes=f"No public {service} profile was observed for the derived username. This is not proof that no account exists."))
         status = "ok" if found or unavailable < len(results) else "unavailable"
-        return ProviderResult(
-            self.name,
-            status,
-            findings=findings,
-            message=f"{found} public profiles observed across {len(results)} services" + (f"; {unavailable} services unavailable" if unavailable else ""),
-        )
+        return ProviderResult(self.name, status, findings=findings, message=f"{found} public profiles observed across {len(results)} services" + (f"; {unavailable} services unavailable" if unavailable else ""))
