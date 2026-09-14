@@ -19,8 +19,6 @@ _IMPLEMENTED_SERVICES: tuple[ServiceDefinition, ...] = tuple(
 )
 
 _PUBLIC_NETWORK_SERVICES: tuple[ServiceDefinition, ...] = (
-    ServiceDefinition("GitHub", "Developer", ("passive public profile",), True, "Public Profile Network"),
-    ServiceDefinition("GitLab", "Developer", ("passive public profile",), True, "Public Profile Network"),
     ServiceDefinition("Reddit", "Social & Community", ("passive public profile",), True, "Public Profile Network"),
     ServiceDefinition("Dev.to", "Developer", ("public profile API",), True, "Public Profile Network"),
     ServiceDefinition("Codeberg", "Developer", ("public profile API",), True, "Public Profile Network"),
@@ -67,8 +65,6 @@ _UNSUPPORTED_SERVICES: tuple[ServiceDefinition, ...] = (
     ServiceDefinition("Nintendo", "Gaming", ("public_profile_page",), False),
 )
 
-# The registry-backed providers remain first-class; the public profile network is
-# represented here as a bounded, real coverage catalog for the account UI.
 SERVICE_CATALOG: tuple[ServiceDefinition, ...] = _IMPLEMENTED_SERVICES + _PUBLIC_NETWORK_SERVICES + _UNSUPPORTED_SERVICES
 
 
@@ -86,24 +82,26 @@ def _public_service_status(name: str, findings: list[dict[str, Any]]) -> str | N
     for item in findings:
         if item.get("source") == "Public Profile Network" and item.get("finding_type") == "service_status" and str(item.get("value") or "").startswith(prefix):
             value = str(item.get("value"))
-            if value.endswith(":no_public_evidence"):
-                return "NO PUBLIC EVIDENCE"
-            if ":rate_limited" in value:
-                return "RATE LIMITED"
-            if ":unavailable" in value:
-                return "UNAVAILABLE"
-            if ":error" in value:
-                return "ERROR"
+            if value.endswith(":no_public_evidence"): return "NO PUBLIC EVIDENCE"
+            if ":rate_limited" in value: return "RATE LIMITED"
+            if ":unavailable" in value: return "UNAVAILABLE"
+            if ":error" in value: return "ERROR"
             return "UNKNOWN"
     return None
 
 
+def _service_from_url(source_url: Any) -> str | None:
+    host = urlparse(str(source_url or "")).netloc.lower().removeprefix("www.")
+    return {
+        "github.com": "GitHub", "gitlab.com": "GitLab", "reddit.com": "Reddit", "dev.to": "Dev.to", "codeberg.org": "Codeberg", "keybase.io": "Keybase", "huggingface.co": "Hugging Face", "bitbucket.org": "Bitbucket", "medium.com": "Medium", "vimeo.com": "Vimeo", "flickr.com": "Flickr", "soundcloud.com": "SoundCloud", "patreon.com": "Patreon", "buymeacoffee.com": "Buy Me a Coffee", "linktr.ee": "Linktree", "about.me": "About.me", "behance.net": "Behance", "dribbble.com": "Dribbble", "producthunt.com": "Product Hunt", "kaggle.com": "Kaggle", "npmjs.com": "npm", "pypi.org": "PyPI", "hub.docker.com": "Docker Hub", "codepen.io": "CodePen", "replit.com": "Replit", "instructables.com": "Instructables", "wattpad.com": "Wattpad", "goodreads.com": "Goodreads", "steamcommunity.com": "Steam", "twitch.tv": "Twitch", "pinterest.com": "Pinterest", "tumblr.com": "Tumblr", "x.com": "X", "instagram.com": "Instagram", "threads.net": "Threads", "youtube.com": "YouTube",
+    }.get(host)
+
+
 def _service_status(defn: ServiceDefinition, findings: list[dict[str, Any]]) -> str:
     if defn.provider == "Public Profile Network":
-        matches = [f for f in findings if f.get("source") == defn.provider and f.get("finding_type") == "profile_candidate" and str(f.get("source_url") or "")]
-        if any(_service_from_url(f.get("source_url")) == defn.name for f in matches):
-            return "POSSIBLE"
-        return _public_service_status(defn.name, findings) or "UNKNOWN"
+        matches = [f for f in findings if f.get("source") == defn.provider and f.get("finding_type") == "profile_candidate" and _service_from_url(f.get("source_url")) == defn.name]
+        return "POSSIBLE" if matches else (_public_service_status(defn.name, findings) or "UNKNOWN")
+
     provider_status = _provider_status(findings, defn.provider)
     if provider_status == "unconfigured": return "UNCONFIGURED"
     if provider_status == "rate_limited": return "RATE LIMITED"
@@ -114,26 +112,13 @@ def _service_status(defn: ServiceDefinition, findings: list[dict[str, Any]]) -> 
     if matches:
         if any(f.get("evidence_state") in {"corroborated_match", "source_associated"} for f in matches): return "FOUND"
         return "POSSIBLE"
+    # GitHub/GitLab can also be observed by the passive public-profile network.
+    if defn.name in {"GitHub", "GitLab"}:
+        public_matches = [f for f in findings if f.get("source") == "Public Profile Network" and f.get("finding_type") == "profile_candidate" and _service_from_url(f.get("source_url")) == defn.name]
+        if public_matches: return "POSSIBLE"
     if defn.supported and provider_status == "ok": return "NO PUBLIC EVIDENCE"
     if not defn.supported: return "UNAVAILABLE"
     return "UNKNOWN"
-
-
-def _service_from_url(source_url: Any) -> str | None:
-    host = urlparse(str(source_url or "")).netloc.lower().removeprefix("www.")
-    return {
-        "github.com": "GitHub", "gitlab.com": "GitLab", "reddit.com": "Reddit", "dev.to": "Dev.to",
-        "codeberg.org": "Codeberg", "keybase.io": "Keybase", "huggingface.co": "Hugging Face",
-        "bitbucket.org": "Bitbucket", "medium.com": "Medium", "vimeo.com": "Vimeo",
-        "flickr.com": "Flickr", "soundcloud.com": "SoundCloud", "patreon.com": "Patreon",
-        "buymeacoffee.com": "Buy Me a Coffee", "linktr.ee": "Linktree", "about.me": "About.me",
-        "behance.net": "Behance", "dribbble.com": "Dribbble", "producthunt.com": "Product Hunt",
-        "kaggle.com": "Kaggle", "npmjs.com": "npm", "pypi.org": "PyPI", "hub.docker.com": "Docker Hub",
-        "codepen.io": "CodePen", "replit.com": "Replit", "instructables.com": "Instructables",
-        "wattpad.com": "Wattpad", "goodreads.com": "Goodreads", "steamcommunity.com": "Steam",
-        "twitch.tv": "Twitch", "pinterest.com": "Pinterest", "tumblr.com": "Tumblr", "x.com": "X",
-        "instagram.com": "Instagram", "threads.net": "Threads", "youtube.com": "YouTube",
-    }.get(host)
 
 
 def _profile_home(service: str) -> str | None:
