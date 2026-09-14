@@ -54,6 +54,12 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
         query = query.where(Finding.execution_attempt_id == inv.execution_attempt_id)
     findings = db.scalars(query.order_by(Finding.id.asc())).all()
     rows = build_account_discovery_matrix([_finding_dict(f) for f in findings])
+    found = [row for row in rows if row["status"] == "FOUND"]
+    possible = [row for row in rows if row["status"] == "POSSIBLE"]
+    unknown = [row for row in rows if row["status"] in {"UNKNOWN", "NO PUBLIC EVIDENCE"}]
+    exposure_findings = [f for f in findings if f.finding_type == "breach"]
+    emailrep_profiles = [f for f in findings if f.source == "EmailRep" and f.finding_type == "profile_observation"]
+    exposure_signals = [f.value for f in findings if f.finding_type == "exposure_signal"]
     return {
         "investigation_id": inv_id,
         "target": inv.target,
@@ -62,6 +68,15 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
         "domain": inv.domain,
         "execution_id": inv.execution_id,
         "execution_attempt_id": inv.execution_attempt_id,
+        "summary": {
+            "services_checked": len(rows),
+            "accounts_found": len(found),
+            "possible_accounts": len(possible),
+            "unknown_accounts": len(unknown),
+            "emailrep_profiles": len(emailrep_profiles),
+            "breaches_found": len(exposure_findings),
+            "exposure_signals": exposure_signals,
+        },
         "provider_execution_status": [
             {
                 "provider": f.source,
@@ -80,6 +95,7 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
             "identity": "correlation_does_not_confirm_identity",
             "negative_results": "no_public_evidence_is_not_account_nonexistence",
             "unsupported": "unsupported_services_are_not_checked_and_are_not_negative_findings",
+            "emailrep": "EmailRep profile observations are source-associated evidence and do not independently prove account ownership",
             "attempt_scope": "only_findings_from_the_current_execution_attempt_are_projected",
         },
         "services": rows,
