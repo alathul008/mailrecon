@@ -10,7 +10,6 @@ from app.providers.github import GitHubProvider
 from app.providers.gitlab import GitLabProvider
 from app.providers.gravatar import GravatarProvider
 from app.providers.hibp import HIBPProvider
-from app.providers.public_profile_network import PublicProfileNetworkProvider
 from app.providers.public_web import PublicWebProvider
 from app.providers.rdap import RDAPProvider
 
@@ -48,8 +47,7 @@ class ProviderDefinition:
 
 
 PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
-    ProviderDefinition("Email Intelligence", "Identity & Exposure", True, ("email_reputation", "email_to_profile", "breach_metadata_api"), "optional EMAILREP_API_KEY", True, True, False, EmailIntelligenceProvider, "email", "email_intelligence", 120),
-    ProviderDefinition("Public Profile Network", "Social & Community", True, ("passive_username_profile_lookup",), "none", True, True, True, PublicProfileNetworkProvider, "candidates", "public_profile_network", 32),
+    ProviderDefinition("Email Intelligence", "Identity & Exposure", True, ("email_reputation", "email_to_profile", "passive_username_profile_lookup", "breach_metadata_api"), "optional EMAILREP_API_KEY", True, True, False, EmailIntelligenceProvider, "email", "email_intelligence", 160),
     ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar", 10),
     ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap", 50),
     ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery", 4),
