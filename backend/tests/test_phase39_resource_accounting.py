@@ -5,22 +5,24 @@ from pathlib import Path
 
 import httpx
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.session import Base
 from app.models import ExecutionAttempt, Finding, Investigation
 from app.osint import dns
-from app.providers.base import ProviderResult
+from app.providers.base import ProviderResult, finding
 from app.providers.http import MAX_EXTERNAL_RESPONSE_BYTES, ResponseTooLargeError, bounded_get
+from app.services.orchestrator import add_findings
 from app.services.resource_budget import ExecutionResourceBudget, bind_accounting
 
 
 def _session_factory():
-    path = Path(tempfile.mkstemp(suffix=".db")[1])
-    engine = create_engine(f"sqlite:///{path}", future=True)
+    handle, raw_path = tempfile.mkstemp(suffix=".db")
+    Path(raw_path).unlink(missing_ok=True)
+    engine = create_engine(f"sqlite:///{raw_path}", future=True)
     Base.metadata.create_all(engine)
-    return engine, sessionmaker(engine, expire_on_commit=False), path
+    return engine, sessionmaker(engine, expire_on_commit=False), Path(raw_path)
 
 
 def _investigation(db):
@@ -58,7 +60,7 @@ def test_real_persistence_boundary_rejects_single_batch_over_global_budget():
             with pytest.raises(RuntimeError, match="persisted-finding budget"):
                 db.commit()
             db.rollback()
-            assert db.scalar(select(Finding).where(Finding.investigation_id == inv_id).count()) if False else True
+            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.investigation_id == inv_id)) == 0
     finally:
         engine.dispose(); path.unlink(missing_ok=True)
 
@@ -75,27 +77,21 @@ def test_real_persistence_boundary_enforces_cumulative_provider_results():
             with pytest.raises(RuntimeError, match="persisted-finding budget"):
                 db.commit()
             db.rollback()
-            assert db.query(Finding).filter(Finding.execution_attempt_id == attempt.execution_attempt_id).count() == 60
+            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.execution_attempt_id == attempt.execution_attempt_id)) == 60
     finally:
         engine.dispose(); path.unlink(missing_ok=True)
 
 
-def test_duplicate_findings_do_not_consume_global_budget_twice():
+def test_deduplicated_findings_do_not_consume_global_budget_twice():
     engine, Session, path = _session_factory()
     try:
         with Session() as db:
             inv_id = _investigation(db)
-            attempt = db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.investigation_id == inv_id))
-            first = _finding(attempt, 1)
-            db.add(first); db.commit()
-            duplicate = _finding(attempt, 1)
-            db.add(duplicate)
-            with pytest.raises(Exception):
-                db.commit()
-            db.rollback()
-            # Duplicate identity is still expected to be rejected by the DB
-            # uniqueness invariant, not counted as an additional budget item.
-            assert db.query(Finding).filter(Finding.execution_attempt_id == attempt.execution_attempt_id).count() == 1
+            payloads = [finding("Test", "test", str(i), 1.0, "info") for i in range(99)]
+            add_findings(db, inv_id, payloads)
+            duplicate = dict(payloads[0])
+            add_findings(db, inv_id, [duplicate, finding("Test", "test", "new", 1.0, "info")])
+            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.investigation_id == inv_id)) == 100
     finally:
         engine.dispose(); path.unlink(missing_ok=True)
 
@@ -113,7 +109,7 @@ def test_historical_attempt_does_not_consume_current_attempt_budget():
             db.commit()
             db.add_all([_finding(current, i, "Current") for i in range(100)])
             db.commit()
-            assert db.query(Finding).filter(Finding.execution_attempt_id == "attempt-current").count() == 100
+            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.execution_attempt_id == "attempt-current")) == 100
     finally:
         engine.dispose(); path.unlink(missing_ok=True)
 
@@ -123,8 +119,7 @@ def test_concurrent_persistence_cannot_bypass_global_limit():
     try:
         with Session() as db:
             inv_id = _investigation(db)
-            attempt = db.scalar(select(ExecutionAttempt).where(ExecutionAttempt.investigation_id == inv_id))
-            attempt_id = attempt.execution_attempt_id
+            attempt_id = db.scalar(select(ExecutionAttempt.execution_attempt_id).where(ExecutionAttempt.investigation_id == inv_id))
 
         def insert_batch(prefix):
             with Session() as db:
@@ -139,7 +134,7 @@ def test_concurrent_persistence_cannot_bypass_global_limit():
             results = list(pool.map(insert_batch, ("A", "B")))
         assert sum(results) == 1
         with Session() as db:
-            assert db.query(Finding).filter(Finding.execution_attempt_id == attempt_id).count() == 60
+            assert db.scalar(select(func.count()).select_from(Finding).where(Finding.execution_attempt_id == attempt_id)) == 60
     finally:
         engine.dispose(); path.unlink(missing_ok=True)
 
@@ -212,7 +207,7 @@ def test_chunked_response_overflow_remains_hard():
     asyncio.run(run())
 
 
-def test_ip_infrastructure_uses_bounded_http_and_preserves_timeout(monkeypatch):
+def test_ip_infrastructure_uses_bounded_http_and_preserves_network_policy(monkeypatch):
     class FakeClient:
         def __init__(self, **kwargs): self.kwargs = kwargs
         async def __aenter__(self): return self
@@ -222,11 +217,13 @@ def test_ip_infrastructure_uses_bounded_http_and_preserves_timeout(monkeypatch):
         assert client.kwargs["follow_redirects"] is False
         assert client.kwargs["trust_env"] is False
         assert client.kwargs["transport"] is not None
+        assert client.kwargs["timeout"] == 7.0
         raise ResponseTooLargeError("oversized")
 
     monkeypatch.setattr(dns.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(dns, "bounded_get", fake_bounded_get)
     monkeypatch.setattr(dns, "get_settings", lambda: type("Settings", (), {"request_timeout_seconds": 7.0})())
+
     async def run():
         accounting = ExecutionResourceBudget(max_infrastructure_http_requests=1).accounting()
         with bind_accounting(accounting):
@@ -237,10 +234,8 @@ def test_ip_infrastructure_uses_bounded_http_and_preserves_timeout(monkeypatch):
 
 
 def test_ip_infrastructure_timeout_and_malformed_response(monkeypatch):
-    async def fake_timeout(*args, **kwargs):
-        raise httpx.ReadTimeout("timeout")
-    async def fake_malformed(*args, **kwargs):
-        return httpx.Response(200, content=b"not-json")
+    async def fake_timeout(*args, **kwargs): raise httpx.ReadTimeout("timeout")
+    async def fake_malformed(*args, **kwargs): return httpx.Response(200, content=b"not-json")
 
     class FakeClient:
         async def __aenter__(self): return self
@@ -262,14 +257,12 @@ def test_ip_infrastructure_timeout_and_malformed_response(monkeypatch):
 
 
 def test_infrastructure_request_budget_rejects_third_request():
-    async def run():
-        budget = ExecutionResourceBudget(max_infrastructure_http_requests=2)
-        accounting = budget.accounting()
+    budget = ExecutionResourceBudget(max_infrastructure_http_requests=2)
+    accounting = budget.accounting()
+    accounting.reserve_infrastructure_http_request()
+    accounting.reserve_infrastructure_http_request()
+    with pytest.raises(RuntimeError, match="infrastructure HTTP budget"):
         accounting.reserve_infrastructure_http_request()
-        accounting.reserve_infrastructure_http_request()
-        with pytest.raises(RuntimeError, match="infrastructure HTTP budget"):
-            accounting.reserve_infrastructure_http_request()
-    asyncio.run(run())
 
 
 def test_operational_provider_status_remains_non_negative_evidence():
