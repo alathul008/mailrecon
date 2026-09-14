@@ -1,9 +1,6 @@
 import type { Investigation, TimelineEvent } from '../types';
 
-export const API = (
-  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api'
-).replace(/\/$/, '');
-
+export const API = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api').replace(/\/$/, '');
 const API_KEY_STORAGE = 'mailrecon_api_key';
 
 export type GraphNode = { id: string; type: string; label: string; metadata?: Record<string, unknown> | null };
@@ -14,7 +11,8 @@ export type CorrelationConflict = { finding_type: string; values: string[]; prov
 export type CorrelationResult = { target_email: string | null; domain: string | null; relationships: CorrelationRelationship[]; conflicts: CorrelationConflict[]; semantics: Record<string, string>; investigation_id: number; execution_id: string | null; execution_attempt_id: string | null; provenance: Record<string, string | null> };
 export type AccountDiscoveryEvidence = { finding_id: number | null; finding_type: string; evidence_state: string | null; confidence: number | null; source: string | null; source_url: string | null; notes: string | null };
 export type AccountDiscoveryService = { category: string; service: string; status: string; supported: boolean; provider: string | null; discovery_methods: string[]; identifier: string | null; confidence: number | null; provider_status: string | null; checked_at: string | null; evidence: AccountDiscoveryEvidence[] };
-export type AccountDiscovery = { investigation_id: number; target: string; normalized_email: string | null; username: string | null; domain: string | null; execution_id: string | null; execution_attempt_id: string | null; summary: { services_checked: number; accounts_found: number; possible_accounts: number; unknown_accounts: number; emailrep_profiles: number; public_profiles_observed: number; breaches_found: number; exposure_signals: string[] }; provider_execution_status: Array<{ provider: string; status: string; checked_at: string | null; message: string | null; finding_id: number; execution_id: string | null; execution_attempt_id: string | null }>; semantics: Record<string, string>; services: AccountDiscoveryService[] };
+export type AccountDiscoveryActivity = { service: string; category: string; status: string; title: string; detail: string; source_url: string | null; at: string | null };
+export type AccountDiscovery = { investigation_id: number; target: string; normalized_email: string | null; username: string | null; domain: string | null; execution_id: string | null; execution_attempt_id: string | null; summary: { services_checked: number; accounts_found: number; confirmed_accounts: number; possible_accounts: number; unknown_accounts: number; emailrep_profiles: number; public_profiles_observed: number; breaches_found: number; exposure_signals: string[] }; provider_execution_status: Array<{ provider: string; status: string; checked_at: string | null; message: string | null; finding_id: number; execution_id: string | null; execution_attempt_id: string | null }>; activity_timeline: AccountDiscoveryActivity[]; semantics: Record<string, string>; services: AccountDiscoveryService[] };
 
 export function getApiKey() { return window.sessionStorage.getItem(API_KEY_STORAGE) || ''; }
 export function setApiKey(key: string) { const normalized = key.trim(); if (normalized) window.sessionStorage.setItem(API_KEY_STORAGE, normalized); else window.sessionStorage.removeItem(API_KEY_STORAGE); }
@@ -37,16 +35,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } finally { window.clearTimeout(timer); }
 }
 
-export async function downloadReport(id: number, format: string) {
-  const apiKey = getApiKey(); const response = await fetch(reportUrl(id, format), { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} });
-  if (!response.ok) {
-    if (response.status === 401) { clearApiKey(); window.dispatchEvent(new CustomEvent('mailrecon:auth-required')); }
-    let message = `Request failed (${response.status})`; try { const body = await response.json(); message = body.detail || body.message || message; } catch { /* Response body may not contain valid JSON. */ }
-    throw new Error(message);
-  }
-  const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `mailrecon-${id}.${format}`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
-}
-
+export async function downloadReport(id: number, format: string) { const apiKey = getApiKey(); const response = await fetch(reportUrl(id, format), { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} }); if (!response.ok) { if (response.status === 401) { clearApiKey(); window.dispatchEvent(new CustomEvent('mailrecon:auth-required')); } let message = `Request failed (${response.status})`; try { const body = await response.json(); message = body.detail || body.message || message; } catch { /* Response body may not contain valid JSON. */ } throw new Error(message); } const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `mailrecon-${id}.${format}`; document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url); }
 export function createInvestigation(email: string, privacy_mode = false, external_provider_disclosure = true) { return request<{ id: number; status: string; external_provider_disclosure: boolean }>('/investigations', { method: 'POST', body: JSON.stringify({ email, privacy_mode, external_provider_disclosure }) }); }
 export function deleteInvestigation(id: number) { return request<{ id: number; status: 'deleted' }>(`/investigations/${id}`, { method: 'DELETE' }); }
 export function getInvestigation(id: number) { return request<Investigation>(`/investigations/${id}`); }
