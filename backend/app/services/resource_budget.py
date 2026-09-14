@@ -77,16 +77,6 @@ class ExecutionResourceAccounting:
         _pending_infrastructure_reservations.set(current - 1)
         return True
 
-    def release_pending_infrastructure_request(self) -> bool:
-        current = _pending_infrastructure_reservations.get()
-        if current <= 0:
-            return False
-        with self._lock:
-            self.external_requests = max(0, self.external_requests - 1)
-            self.infrastructure_http_requests = max(0, self.infrastructure_http_requests - 1)
-        _pending_infrastructure_reservations.set(current - 1)
-        return True
-
     def record_public_web_query(self, result_count: int) -> None:
         if result_count < 0:
             raise ValueError("Public Web result count cannot be negative")
@@ -101,11 +91,13 @@ def current_accounting() -> ExecutionResourceAccounting | None:
 
 @contextmanager
 def bind_accounting(accounting: ExecutionResourceAccounting) -> Iterator[None]:
-    token = _current_accounting.set(accounting)
+    accounting_token = _current_accounting.set(accounting)
+    pending_token = _pending_infrastructure_reservations.set(0)
     try:
         yield
     finally:
-        _current_accounting.reset(token)
+        _pending_infrastructure_reservations.reset(pending_token)
+        _current_accounting.reset(accounting_token)
 
 
 @dataclass(frozen=True)
