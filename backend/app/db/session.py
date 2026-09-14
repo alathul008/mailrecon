@@ -27,6 +27,12 @@ def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
 SessionLocal = sessionmaker(engine, expire_on_commit=False, class_=Session)
 
 
+def validate_finding_execution_provenance(finding) -> None:
+    """Reject execution-derived findings that have no durable attempt identity."""
+    if finding.execution_id and not finding.execution_attempt_id:
+        raise RuntimeError("Execution-derived Finding requires execution-attempt provenance")
+
+
 def _finding_identity(finding) -> tuple:
     if finding.persistence_key:
         return ("persistence", finding.persistence_key)
@@ -63,13 +69,12 @@ def _enforce_persisted_finding_budget(session, flush_context, instances):
     """
     from app.models import ExecutionAttempt, Finding
 
-    pending = [obj for obj in session.new if isinstance(obj, Finding) and obj.execution_attempt_id]
     if session.bind is engine:
         for finding in session.new:
-            if isinstance(finding, Finding) and finding.execution_id and not finding.execution_attempt_id:
-                raise RuntimeError(
-                    "Execution-derived Finding requires execution-attempt provenance"
-                )
+            if isinstance(finding, Finding):
+                validate_finding_execution_provenance(finding)
+
+    pending = [obj for obj in session.new if isinstance(obj, Finding) and obj.execution_attempt_id]
     if not pending:
         return
 
