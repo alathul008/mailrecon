@@ -113,7 +113,7 @@ class ExecutionResourceBudget:
 
     max_provider_calls: int = 8
     max_candidate_probes: int = 4
-    max_external_requests: int = 40
+    max_external_requests: int = 32
     max_response_bytes: int = 8 * 1024 * 1024
     max_dns_queries: int = 15
     max_infrastructure_http_requests: int = 2
