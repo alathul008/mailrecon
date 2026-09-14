@@ -38,11 +38,11 @@ class ExecutionResourceAccounting:
 
     def reserve_http_request(self, *, infrastructure: bool = False) -> None:
         with self._lock:
+            if infrastructure and self.infrastructure_http_requests >= self.budget.max_infrastructure_http_requests:
+                raise ResourceBudgetExceeded("Investigation infrastructure HTTP budget exceeded")
             if self.external_requests >= self.budget.max_external_requests:
                 raise ResourceBudgetExceeded("Investigation external-request budget exceeded")
             self.external_requests += 1
-            if infrastructure and self.infrastructure_http_requests >= self.budget.max_infrastructure_http_requests:
-                raise ResourceBudgetExceeded("Investigation infrastructure HTTP budget exceeded")
             if infrastructure:
                 self.infrastructure_http_requests += 1
 
