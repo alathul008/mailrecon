@@ -5,7 +5,6 @@ from typing import Callable, Protocol
 
 from app.core.config import get_settings
 from app.providers.base import ProviderContext, ProviderResult
-from app.providers.email_intelligence import EmailIntelligenceProvider
 from app.providers.github import GitHubProvider
 from app.providers.gitlab import GitLabProvider
 from app.providers.gravatar import GravatarProvider
@@ -52,7 +51,6 @@ PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
     ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery", 4),
     ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab", 20),
     ProviderDefinition("Have I Been Pwned", "Exposure", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources", 100),
-    ProviderDefinition("Email Intelligence", "Identity & Exposure", True, ("email_reputation", "linked_profiles", "breach_metadata"), "optional EMAILREP_API_KEY", True, True, True, EmailIntelligenceProvider, "email", "email_intelligence", 120),
     ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web", 50),
     ProviderDefinition("DNS", "Network", True, ("dns_resolution",), "none", True, False, True),
     ProviderDefinition("Ollama", "Local AI", True, ("local_model_api",), "optional local model", False, False, False),
@@ -85,8 +83,6 @@ def configured_status(definition: ProviderDefinition) -> str:
         return "configured" if settings.github_token else "available"
     if definition.name == "Have I Been Pwned":
         return "configured" if settings.hibp_api_key else "unconfigured"
-    if definition.name == "Email Intelligence":
-        return "configured" if settings.emailrep_api_key else "available (keyless)"
     if definition.name == "Public Web":
         return "configured" if settings.public_web_search_url else "unconfigured"
     if definition.name == "Ollama":
