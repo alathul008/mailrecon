@@ -2,6 +2,17 @@ import pytest
 
 from app.providers.base import ProviderResult
 from app.providers.email_intelligence import EmailIntelligenceProvider
+from app.providers.registry import provider_definition
+
+
+def test_email_intelligence_is_registered_and_executable():
+    definition = provider_definition("Email Intelligence")
+    assert definition.supported is True
+    assert definition.account_discovery is True
+    assert definition.orchestrated is True
+    assert definition.argument_mode == "email"
+    assert definition.module == "email_intelligence"
+    assert definition.factory is EmailIntelligenceProvider
 
 
 @pytest.mark.asyncio
