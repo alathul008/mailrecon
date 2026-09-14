@@ -126,7 +126,7 @@ def test_dns_provider_failure_still_accounts_the_attempt_once():
         async def resolve(self, name, rdtype):
             nonlocal calls
             calls += 1
-            raise dns.exception.Timeout("deterministic timeout")
+            raise asyncio.TimeoutError("deterministic timeout")
 
     async def run():
         accounting = ExecutionResourceBudget(max_dns_queries=2).accounting()
