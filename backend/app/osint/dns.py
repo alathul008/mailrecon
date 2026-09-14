@@ -8,8 +8,9 @@ import dns.resolver
 import httpx
 
 from app.core.config import get_settings
-from app.providers.http import classify_response, parse_json, validate_provider_url
+from app.providers.http import bounded_get, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
+from app.services.resource_budget import current_accounting
 
 
 MAX_INFRA_IPS = 2
@@ -124,13 +125,16 @@ def record_presence(values, status):
 async def _ip_context(address: str) -> dict | None:
     try:
         parsed = ipaddress.ip_address(address)
-        if parsed.is_private or parsed.is_loopback or parsed.is_link_local or parsed.is_multicast or parsed.is_reserved:
-            return None
+        if not parsed.is_global:
+            return {"ip": address, "status": "error", "message": "IP address is not globally routable"}
         url = f"https://rdap.org/ip/{quote(address, safe=':')}"
         validate_provider_url(url)
         settings = get_settings()
+        accounting = current_accounting()
+        if accounting is not None:
+            accounting.reserve_infrastructure_http_request()
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
-            response = await client.get(url)
+            response = await bounded_get(client, url)
         failure = classify_response("IP Infrastructure", response)
         if failure:
             return {"ip": address, "status": failure.status, "message": failure.message}
