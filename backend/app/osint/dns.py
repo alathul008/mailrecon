@@ -141,12 +141,8 @@ async def _ip_context(address: str) -> dict | None:
         if accounting is not None:
             accounting.reserve_infrastructure_http_request()
             reserved = True
-        try:
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
-                response = await bounded_get(client, url, infrastructure=reserved)
-        finally:
-            if accounting is not None:
-                accounting.release_pending_infrastructure_request()
+        async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
+            response = await bounded_get(client, url, infrastructure=reserved)
         failure = classify_response("IP Infrastructure", response)
         if failure:
             return {"ip": address, "status": failure.status, "message": failure.message}
