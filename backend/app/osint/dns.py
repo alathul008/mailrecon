@@ -115,7 +115,7 @@ async def _resolve(resolver, name, rdtype):
         return [r.to_text().strip('"') for r in answer], "ok"
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return [], "no_result"
-    except (dns.exception.Timeout, dns.resolver.NoNameservers):
+    except (dns.exception.Timeout, dns.resolver.NoNameservers, asyncio.TimeoutError):
         return [], "unavailable"
     except dns.exception.DNSException:
         return [], "unavailable"
