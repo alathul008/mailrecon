@@ -48,10 +48,6 @@ class GitHubProvider:
                     return failure
                 data, parse_failure = parse_json(response, self.name)
                 if parse_failure:
-                    fallback = await self._public_page_fallback(username, settings)
-                    if fallback:
-                        findings.append(finding(self.name, "profile_candidate", fallback["html_url"], 0.72, "info", fallback["html_url"], notes=f"Evidence state: {EVIDENCE_OBSERVED}. Public GitHub profile page observed for derived username; username correlation remains possible and is not identity confirmation.", raw_reference={"login": username, "fallback": True, "evidence_state": EVIDENCE_OBSERVED}))
-                        continue
                     return parse_failure
                 if not isinstance(data, dict):
                     return ProviderResult(self.name, "error", message="GitHub profile response was malformed")
