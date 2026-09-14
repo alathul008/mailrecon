@@ -50,7 +50,7 @@ PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
     ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap", 50),
     ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery", 4),
     ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab", 20),
-    ProviderDefinition("Have I Been Pwned", "Other", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources", 100),
+    ProviderDefinition("Have I Been Pwned", "Exposure", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources", 100),
     ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web", 50),
     ProviderDefinition("DNS", "Network", True, ("dns_resolution",), "none", True, False, True),
     ProviderDefinition("Ollama", "Local AI", True, ("local_model_api",), "optional local model", False, False, False),
