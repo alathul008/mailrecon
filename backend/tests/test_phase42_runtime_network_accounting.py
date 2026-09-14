@@ -231,6 +231,7 @@ def test_public_web_query_result_accounting_is_not_double_counted(monkeypatch):
             "request_timeout_seconds": 7.0,
         })()
         monkeypatch.setattr("app.providers.public_web.get_settings", lambda: settings)
+        monkeypatch.setattr("app.providers.public_web.validate_provider_url", lambda url: url)
         monkeypatch.setattr("app.providers.public_web.pinned_transport", lambda url: None)
         monkeypatch.setattr("app.providers.public_web.httpx.AsyncClient", lambda **kwargs: _mock_client(handler))
         accounting = ExecutionResourceBudget(max_external_requests=2, max_public_web_queries=5).accounting()
