@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -73,9 +73,15 @@ class PublicProfileNetworkProvider:
             failure = classify_response(self.name, response)
             if failure:
                 return failure.status, failure.message
-            if 200 <= response.status_code < 300:
-                return "found", None
-            return "unknown", f"{service}: unexpected HTTP {response.status_code}"
+            if not 200 <= response.status_code < 300:
+                return "unknown", f"{service}: unexpected HTTP {response.status_code}"
+            # Avoid treating generic login/search shells as profiles. Require the
+            # derived handle to occur in the returned public document for HTML checks.
+            parsed = urlparse(url)
+            candidate = parsed.path.rstrip("/").split("/")[-1].lstrip("@").casefold()
+            if candidate and candidate not in response.text.casefold():
+                return "unknown", f"{service}: public page did not contain the requested handle"
+            return "found", None
         except Exception as exc:
             return "error", f"{service}: {type(exc).__name__}"
 
@@ -115,11 +121,7 @@ class PublicProfileNetworkProvider:
             status, data, message = await self._json_probe(service, api_map[service])
             return service, category, status, url, data, message
         if service == "Keybase":
-            status, data, message = await self._json_probe(
-                service,
-                "https://keybase.io/_/api/1.0/user/lookup.json",
-                params={"usernames": username, "fields": "basics,profile,proofs_summary"},
-            )
+            status, data, message = await self._json_probe(service, "https://keybase.io/_/api/1.0/user/lookup.json", params={"usernames": username, "fields": "basics,profile,proofs_summary"})
             if status == "found" and isinstance(data, dict) and not data.get("them"):
                 status = "not_found"
             return service, category, status, url, data, message
@@ -142,22 +144,11 @@ class PublicProfileNetworkProvider:
                     for key in ("username", "login", "name", "id", "fullName"):
                         if data.get(key) is not None:
                             details[key] = data.get(key)
-                findings.append(
-                    finding(
-                        self.name,
-                        "profile_candidate",
-                        username,
-                        0.72,
-                        "info",
-                        profile_url,
-                        notes=f"Evidence state: {EVIDENCE_OBSERVED}. Public {service} profile was observed for the derived username. The email-to-profile relationship remains a possible correlation and is not identity confirmation.",
-                        raw_reference={"service": service, "category": category, "username": username, "profile": details, "evidence_state": EVIDENCE_OBSERVED},
-                    )
-                )
+                findings.append(finding(self.name, "profile_candidate", username, 0.72, "info", profile_url, notes=f"Evidence state: {EVIDENCE_OBSERVED}. Public {service} profile was observed for the derived username. The email-to-profile relationship remains a possible correlation and is not identity confirmation.", raw_reference={"service": service, "category": category, "username": username, "profile": details, "evidence_state": EVIDENCE_OBSERVED}))
             elif status in {"error", "rate_limited", "unavailable"}:
                 unavailable += 1
                 findings.append(finding(self.name, "service_status", f"{service}:{status}", 1.0, "warning", profile_url, notes=message or f"{service} could not be checked."))
             else:
-                findings.append(finding(self.name, "service_status", f"{service}:no_public_evidence", 1.0, "info", profile_url, notes=f"No public {service} profile was observed for the derived username. This is not proof that no account exists."))
+                findings.append(finding(self.name, "service_status", f"{service}:no_public_evidence", 1.0, "info", profile_url, notes=message or f"No public {service} profile was observed for the derived username. This is not proof that no account exists."))
         status = "ok" if found or unavailable < len(results) else "unavailable"
         return ProviderResult(self.name, status, findings=findings, message=f"{found} public profiles observed across {len(results)} services" + (f"; {unavailable} services unavailable" if unavailable else ""))
