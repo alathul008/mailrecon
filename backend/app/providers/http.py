@@ -5,7 +5,7 @@ from typing import Any
 
 from app.core.security import validate_external_url
 from app.providers.base import ProviderResult
-from app.services.resource_budget import current_accounting
+from app.services.resource_budget import ResourceBudgetExceeded, current_accounting
 
 
 MAX_EXTERNAL_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -15,14 +15,27 @@ class ResponseTooLargeError(ValueError):
     """An external response exceeded the project-wide response byte budget."""
 
 
-async def bounded_get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:
-    """GET an external resource with per-response and per-attempt byte bounds.
+async def bounded_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    infrastructure: bool = False,
+    **kwargs: Any,
+) -> httpx.Response:
+    """GET an external resource with runtime request and response bounds.
 
-    Content-Length is only an early rejection. Actual received bytes are counted
-    from streamed chunks. When an execution accounting context is active, those
-    actual bytes also consume the aggregate per-attempt response budget.
+    The external-request budget is reserved immediately before the actual HTTP
+    operation. Infrastructure callers use the second budget dimension without
+    double-counting the same request. Actual received bytes are counted from
+    streamed chunks against the shared execution-attempt accounting.
     """
     accounting = current_accounting()
+    if accounting is not None:
+        if infrastructure and accounting.consume_reserved_infrastructure_request():
+            pass
+        else:
+            accounting.reserve_http_request(infrastructure=infrastructure)
+
     if not hasattr(client, "stream"):
         response = await client.get(url, **kwargs)
         size = len(response.content)
@@ -57,7 +70,6 @@ async def bounded_get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> htt
                     accounting.consume_response_bytes(len(chunk))
                 chunks.append(chunk)
         except Exception:
-            # Bytes already received were accounted before any parsing occurs.
             raise
         return httpx.Response(
             status_code=response.status_code,
@@ -69,7 +81,9 @@ async def bounded_get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> htt
 
 
 def classify_exception(provider: str, exc: Exception) -> ProviderResult:
-    if isinstance(exc, httpx.TimeoutException):
+    if isinstance(exc, ResourceBudgetExceeded):
+        status = "resource_limited"
+    elif isinstance(exc, httpx.TimeoutException):
         status = "unavailable"
     elif isinstance(exc, httpx.RequestError):
         status = "unavailable"
