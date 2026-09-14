@@ -12,7 +12,9 @@ from app.providers.hibp import HIBPProvider
 from app.providers.public_web import PublicWebProvider
 from app.providers.rdap import RDAPProvider
 
-OPERATIONAL_STATES = ("ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled", "resource_limited")
+# Keep this tuple backward-compatible: resource_limited is an execution outcome,
+# not a provider operational state.
+OPERATIONAL_STATES = ("ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled")
 INVOCATION_MODES = ("email", "domain", "candidates")
 
 
