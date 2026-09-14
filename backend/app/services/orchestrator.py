@@ -237,10 +237,8 @@ async def run_investigation(inv_id:int,token:str):
             if dns.get("NS_PROVIDER"):fs.append(finding("DNS","nameserver_provider",dns["NS_PROVIDER"],.8,"info",notes="Passive nameserver pattern classification; shared infrastructure does not establish ownership.",evidence_state=EVIDENCE_DERIVED))
             for item in dns.get("IP_CONTEXT",[]):
                 if not item:continue
-                if item.get("status")!="ok":
-                    fs.append(finding("IP Infrastructure","provider_status",item.get("status","error"),1.0,"warning",notes=item.get("message") or "IP infrastructure enrichment unavailable.",evidence_state=EVIDENCE_OBSERVED));continue
-                details={k:item.get(k) for k in ("asn","network","organization") if item.get(k)}
-                fs.append(finding("IP Infrastructure","ip_context",item["ip"],.8,"info",notes="Passive IP registration context: "+json.dumps(details,sort_keys=True,separators=(",",":"))+". Shared IP infrastructure is not identity confirmation.",evidence_state=EVIDENCE_OBSERVED))
+                if item.get("status")!="ok":fs.append(finding("IP Infrastructure","provider_status",item.get("status","error"),1.0,"warning",notes=item.get("message") or "IP infrastructure enrichment unavailable.",evidence_state=EVIDENCE_OBSERVED));continue
+                details={k:item.get(k) for k in ("asn","network","organization") if item.get(k)};fs.append(finding("IP Infrastructure","ip_context",item["ip"],.8,"info",notes="Passive IP registration context: "+json.dumps(details,sort_keys=True,separators=(",",":"))+". Shared IP infrastructure is not identity confirmation.",evidence_state=EVIDENCE_OBSERVED))
             add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS, email-authentication, mail-service and bounded IP context analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
             provider_modules=[definition.module for definition in PROVIDER_DEFINITIONS if definition.factory is not None and definition.module]
             for name in provider_modules:set_module(db,inv_id,name,"running",token=token)
@@ -250,14 +248,10 @@ async def run_investigation(inv_id:int,token:str):
                 if isinstance(res,Exception):set_module(db,inv_id,name,"failed",f"Provider exception: {type(res).__name__}",token);add_findings(db,inv_id,[finding(name,"provider_status","error",1.0,"warning",notes=f"Provider raised {type(res).__name__}",evidence_state=EVIDENCE_OBSERVED)],token)
                 else:add_findings(db,inv_id,[provider_finding(res),*res.findings],token);set_module(db,inv_id,name,"completed" if res.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",res.message,token)
             set_module(db,inv_id,"email_intelligence","running",token=token)
-            if inv.external_provider_disclosure:
-                email_intelligence_result=await EmailIntelligenceProvider().run(ProviderContext(email=analysis["email"],domain=analysis["domain"],candidates=tuple(candidates[:3])))
-            else:
-                email_intelligence_result=ProviderResult("Email Intelligence","disabled",message="External provider disclosure disabled for this investigation")
-            add_findings(db,inv_id,[provider_finding(email_intelligence_result),*email_intelligence_result.findings],token)
-            set_module(db,inv_id,"email_intelligence","completed" if email_intelligence_result.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",email_intelligence_result.message,token)
-            rdap_index=next((index for index,item in enumerate(executable_definitions) if item.name=="RDAP"),None)
-            consistency=_rdap_domain_consistency(analysis["domain"],results[rdap_index]) if rdap_index is not None else None
+            if inv.external_provider_disclosure:email_intelligence_result=await EmailIntelligenceProvider().run(ProviderContext(email=analysis["email"],domain=analysis["domain"],candidates=tuple(candidates[:3])))
+            else:email_intelligence_result=ProviderResult("Email Intelligence","disabled",message="External provider disclosure disabled for this investigation")
+            add_findings(db,inv_id,[provider_finding(email_intelligence_result),*email_intelligence_result.findings],token);set_module(db,inv_id,"email_intelligence","completed" if email_intelligence_result.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",email_intelligence_result.message,token)
+            rdap_index=next((index for index,item in enumerate(executable_definitions) if item.name=="RDAP"),None);consistency=_rdap_domain_consistency(analysis["domain"],results[rdap_index]) if rdap_index is not None else None
             if consistency:add_findings(db,inv_id,[consistency],token)
             set_module(db,inv_id,"risk_calculation","running",token=token);rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==execution_attempt_id)).all();risk=calculate({**analysis},[{"finding_type":r.finding_type,"confidence":r.confidence,"value":r.value,"notes":r.notes,"evidence_state":r.evidence_state,"raw_reference":r.raw_reference} for r in rows]);_capture_owned_execution(db,inv_id,token);inv.risk_score=risk.score;inv.risk_level=risk.level;db.commit();add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_factor",f["reason"],1.0,"high" if f["delta"]>10 else "medium" if f["delta"]>0 else "info",notes=f"Score delta: {f['delta']:+d}; dimension={f['dimension']}",evidence_state=EVIDENCE_DERIVED) for f in risk.factors],token);add_findings(db,inv_id,[finding("MailRecon Risk Engine","risk_dimension",f"{k}={v}",1.0,"info",notes="Dimension score, not a probability of compromise.",evidence_state=EVIDENCE_DERIVED) for k,v in risk.dimensions.items()],token);set_module(db,inv_id,"risk_calculation","completed",f"Risk score {risk.score}/100 ({risk.level})",token)
             ai_summary=await OllamaProvider().summarize(inv.target,[{"finding_type":r.finding_type,"value":r.value,"confidence":r.confidence,"severity":r.severity,"source":r.source} for r in rows]);
@@ -267,8 +261,8 @@ async def run_investigation(inv_id:int,token:str):
             rows=db.scalars(select(Finding).where(Finding.investigation_id==inv_id,Finding.execution_attempt_id==execution_attempt_id)).all();seen=set()
             for r in rows:
                 state=_finding_evidence_state(r)
-                if r.finding_type in {"breach","profile_candidate","public_identity","profile","public_web_reference"}:
-                    typ={"breach":"BREACH","profile_candidate":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE","public_web_reference":"WEB_REFERENCE"}[r.finding_type];key=f"{typ.lower()}:{r.value}"
+                if r.finding_type in {"breach","profile_candidate","profile_observation","public_identity","profile","public_web_reference"}:
+                    typ={"breach":"BREACH","profile_candidate":"PROFILE","profile_observation":"PROFILE","public_identity":"IDENTITY","profile":"PROFILE","public_web_reference":"WEB_REFERENCE"}[r.finding_type];key=f"{typ.lower()}:{r.value}"
                     if key in seen:continue
                     seen.add(key);db.add(GraphNode(investigation_id=inv_id,node_key=key,node_type=typ,label=r.value,node_metadata={"evidence_state":state,"confidence":r.confidence,"source_url":r.source_url}));db.add(GraphEdge(investigation_id=inv_id,source=email_node.node_key,target=key,relation=_graph_relation(r.finding_type,state),confidence=r.confidence))
             _capture_owned_execution(db,inv_id,token);set_module(db,inv_id,"graph_build","completed","Relationship graph built with evidence-state-aware relationships",token);finish_execution_attempt(db,inv_id,execution_attempt_id,"completed");result=db.execute(update(Investigation).where(Investigation.id==inv_id,Investigation.status=="running",Investigation.execution_token==token).values(status="completed",completed_at=utcnow(),execution_heartbeat_at=None,execution_token=None));db.commit()
