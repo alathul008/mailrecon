@@ -8,7 +8,7 @@ from app.osint.email import EVIDENCE_POSSIBLE
 from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
-from app.services.resource_budget import ExecutionResourceBudget
+from app.services.resource_budget import ExecutionResourceBudget, current_accounting
 
 
 class PublicWebProvider:
@@ -95,7 +95,11 @@ class PublicWebProvider:
                     data, parse_failure = parse_json(response, self.name)
                     if parse_failure:
                         return parse_failure
-                    for rank, item in enumerate(self._results(data)[:budget.max_public_web_results_per_query], start=1):
+                    query_results = self._results(data)[:budget.max_public_web_results_per_query]
+                    accounting = current_accounting()
+                    if accounting is not None:
+                        accounting.record_public_web_query(len(query_results))
+                    for rank, item in enumerate(query_results, start=1):
                         result = self._normalized(item, query, query_type, rank)
                         if not result or result["result_identity"] in seen:
                             continue

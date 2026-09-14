@@ -10,7 +10,7 @@ import httpx
 from app.core.config import get_settings
 from app.providers.http import bounded_get, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
-from app.services.resource_budget import current_accounting
+from app.services.resource_budget import ResourceBudgetExceeded, current_accounting
 
 
 MAX_INFRA_IPS = 2
@@ -104,20 +104,28 @@ def _classify_dns_provider(records: list[str]) -> str | None:
 
 
 async def _resolve(resolver, name, rdtype):
+    accounting = current_accounting()
+    if accounting is not None:
+        try:
+            accounting.consume_dns_query()
+        except ResourceBudgetExceeded:
+            return [], "resource_limited"
     try:
         answer = await resolver.resolve(name, rdtype)
         return [r.to_text().strip('"') for r in answer], "ok"
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
         return [], "no_result"
-    except (dns.exception.Timeout, dns.resolver.NoNameservers):
+    except (dns.exception.Timeout, dns.resolver.NoNameservers, asyncio.TimeoutError):
+        return [], "unavailable"
+    except dns.exception.DNSException:
         return [], "unavailable"
     except Exception:
         return [], "error"
 
 
 def record_presence(values, status):
-    """Return True/False for an answered DNS query, None when unavailable/error."""
-    if status in {"unavailable", "error"} or status is False:
+    """Return True/False for an answered DNS query, None when unavailable/error/limited."""
+    if status in {"unavailable", "error", "resource_limited"} or status is False:
         return None
     return bool(values)
 
@@ -131,10 +139,12 @@ async def _ip_context(address: str) -> dict | None:
         validate_provider_url(url)
         settings = get_settings()
         accounting = current_accounting()
+        reserved = False
         if accounting is not None:
             accounting.reserve_infrastructure_http_request()
+            reserved = True
         async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
-            response = await bounded_get(client, url)
+            response = await bounded_get(client, url, infrastructure=reserved)
         failure = classify_response("IP Infrastructure", response)
         if failure:
             return {"ip": address, "status": failure.status, "message": failure.message}
@@ -158,6 +168,8 @@ async def _ip_context(address: str) -> dict | None:
             "network": data.get("name") if isinstance(data.get("name"), str) else None,
             "organization": names[0] if names else None,
         }
+    except ResourceBudgetExceeded as exc:
+        return {"ip": address, "status": "resource_limited", "message": str(exc)}
     except Exception as exc:
         return {"ip": address, "status": "error", "message": type(exc).__name__}
 
@@ -203,13 +215,20 @@ async def resolve(domain: str) -> dict:
             dkim.extend([f"{selector}: {value}" for value in values if value.lower().startswith("v=dkim1")])
         dkim_statuses.append(status)
     out["DKIM"] = dkim
-    out["DKIM_status"] = "ok" if dkim else ("unavailable" if "unavailable" in dkim_statuses or "error" in dkim_statuses else "no_result")
+    if dkim:
+        out["DKIM_status"] = "ok"
+    elif "resource_limited" in dkim_statuses:
+        out["DKIM_status"] = "resource_limited"
+    elif "unavailable" in dkim_statuses or "error" in dkim_statuses:
+        out["DKIM_status"] = "unavailable"
+    else:
+        out["DKIM_status"] = "no_result"
     out["DKIM_analysis"] = _parse_dkim(dkim)
 
     if statuses["DS"] == "ok" and out["DS"]:
         out["DNSSEC"] = True
         out["DNSSEC_status"] = "ok"
-    elif statuses["DS"] in {"unavailable", "error"}:
+    elif statuses["DS"] in {"unavailable", "error", "resource_limited"}:
         out["DNSSEC"] = None
         out["DNSSEC_status"] = statuses["DS"]
     else:
