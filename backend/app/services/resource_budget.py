@@ -8,6 +8,13 @@ from typing import Iterator
 _current_accounting: ContextVar["ExecutionResourceAccounting | None"] = ContextVar(
     "mailrecon_resource_accounting", default=None
 )
+_pending_infrastructure_reservations: ContextVar[int] = ContextVar(
+    "mailrecon_pending_infrastructure_reservations", default=0
+)
+
+
+class ResourceBudgetExceeded(RuntimeError):
+    """A runtime resource budget prevented an outbound operation."""
 
 
 @dataclass
@@ -15,9 +22,35 @@ class ExecutionResourceAccounting:
     """Runtime accounting shared by one execution attempt."""
 
     budget: "ExecutionResourceBudget"
+    external_requests: int = 0
+    dns_queries: int = 0
     response_bytes: int = 0
     infrastructure_http_requests: int = 0
+    public_web_queries: int = 0
+    public_web_results: int = 0
     _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+
+    def reserve_external_request(self) -> None:
+        with self._lock:
+            if self.external_requests >= self.budget.max_external_requests:
+                raise ResourceBudgetExceeded("Investigation external-request budget exceeded")
+            self.external_requests += 1
+
+    def reserve_http_request(self, *, infrastructure: bool = False) -> None:
+        with self._lock:
+            if self.external_requests >= self.budget.max_external_requests:
+                raise ResourceBudgetExceeded("Investigation external-request budget exceeded")
+            if infrastructure and self.infrastructure_http_requests >= self.budget.max_infrastructure_http_requests:
+                raise ResourceBudgetExceeded("Investigation infrastructure HTTP budget exceeded")
+            self.external_requests += 1
+            if infrastructure:
+                self.infrastructure_http_requests += 1
+
+    def consume_dns_query(self) -> None:
+        with self._lock:
+            if self.dns_queries >= self.budget.max_dns_queries:
+                raise ResourceBudgetExceeded("Investigation DNS-query budget exceeded")
+            self.dns_queries += 1
 
     def consume_response_bytes(self, amount: int) -> None:
         if amount < 0:
@@ -25,13 +58,41 @@ class ExecutionResourceAccounting:
         with self._lock:
             self.response_bytes += amount
             if self.response_bytes > self.budget.max_response_bytes:
-                raise RuntimeError("Investigation aggregate response-byte budget exceeded")
+                raise ResourceBudgetExceeded("Investigation aggregate response-byte budget exceeded")
 
     def reserve_infrastructure_http_request(self) -> None:
+        """Reserve an infrastructure request and mark it for the HTTP boundary.
+
+        The marker prevents bounded_get() from counting the same HTTP request
+        twice. It is task-local so concurrent execution attempts remain isolated.
+        """
+        self.reserve_http_request(infrastructure=True)
+        current = _pending_infrastructure_reservations.get()
+        _pending_infrastructure_reservations.set(current + 1)
+
+    def consume_reserved_infrastructure_request(self) -> bool:
+        current = _pending_infrastructure_reservations.get()
+        if current <= 0:
+            return False
+        _pending_infrastructure_reservations.set(current - 1)
+        return True
+
+    def release_pending_infrastructure_request(self) -> bool:
+        current = _pending_infrastructure_reservations.get()
+        if current <= 0:
+            return False
         with self._lock:
-            if self.infrastructure_http_requests >= self.budget.max_infrastructure_http_requests:
-                raise RuntimeError("Investigation infrastructure HTTP budget exceeded")
-            self.infrastructure_http_requests += 1
+            self.external_requests = max(0, self.external_requests - 1)
+            self.infrastructure_http_requests = max(0, self.infrastructure_http_requests - 1)
+        _pending_infrastructure_reservations.set(current - 1)
+        return True
+
+    def record_public_web_query(self, result_count: int) -> None:
+        if result_count < 0:
+            raise ValueError("Public Web result count cannot be negative")
+        with self._lock:
+            self.public_web_queries += 1
+            self.public_web_results += result_count
 
 
 def current_accounting() -> ExecutionResourceAccounting | None:
@@ -53,8 +114,9 @@ class ExecutionResourceBudget:
 
     Admission limits bound planned work, provider limits bound one provider
     result, per-response limits protect each network response, and
-    ExecutionResourceAccounting enforces aggregate runtime response bytes and
-    infrastructure requests for one execution attempt.
+    ExecutionResourceAccounting enforces runtime outbound requests, DNS
+    queries, aggregate response bytes, infrastructure requests, and Public
+    Web query/result observations for one execution attempt.
     """
 
     max_provider_calls: int = 8
