@@ -117,6 +117,8 @@ async def _resolve(resolver, name, rdtype):
         return [], "no_result"
     except (dns.exception.Timeout, dns.resolver.NoNameservers):
         return [], "unavailable"
+    except dns.exception.DNSException:
+        return [], "unavailable"
     except Exception:
         return [], "error"
 
