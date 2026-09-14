@@ -143,7 +143,7 @@ def _public_network_rows(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for f in findings:
-        if f.get("source") != "Public Profile Network" or f.get("finding_type") != "public_profile":
+        if f.get("source") != "Public Profile Network" or f.get("finding_type") != "profile_candidate":
             continue
         source_url = str(f.get("source_url") or "")
         host = urlparse(source_url).netloc.lower().removeprefix("www.")
