@@ -11,37 +11,15 @@ router = APIRouter(prefix="/api")
 
 
 def _finding_dict(f: Finding) -> dict:
-    # Structured evidence_state is authoritative. The raw-reference fallback
-    # exists only for legacy rows created before the structured column existed.
     evidence_state = f.evidence_state
     if not evidence_state and isinstance(f.raw_reference, dict):
         evidence_state = f.raw_reference.get("evidence_state")
-    return {
-        "id": f.id,
-        "source": f.source,
-        "source_url": f.source_url,
-        "finding_type": f.finding_type,
-        "value": f.value,
-        "confidence": f.confidence,
-        "evidence_state": evidence_state,
-        "notes": f.notes,
-        "collected_at": f.collected_at,
-        "raw_reference": f.raw_reference,
-    }
+    return {"id": f.id, "source": f.source, "source_url": f.source_url, "finding_type": f.finding_type, "value": f.value, "confidence": f.confidence, "evidence_state": evidence_state, "notes": f.notes, "collected_at": f.collected_at, "raw_reference": f.raw_reference}
 
 
 @router.get("/service-catalog", dependencies=[Depends(require_api_key)])
 def service_catalog():
-    return [
-        {
-            "service": item.name,
-            "category": item.category,
-            "supported": item.supported,
-            "provider": item.provider,
-            "discovery_methods": list(item.discovery_methods),
-        }
-        for item in SERVICE_CATALOG
-    ]
+    return [{"service": item.name, "category": item.category, "supported": item.supported, "provider": item.provider, "discovery_methods": list(item.discovery_methods)} for item in SERVICE_CATALOG]
 
 
 @router.get("/investigations/{inv_id}/account-discovery", dependencies=[Depends(require_api_key)])
@@ -53,7 +31,8 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
     if inv.execution_attempt_id:
         query = query.where(Finding.execution_attempt_id == inv.execution_attempt_id)
     findings = db.scalars(query.order_by(Finding.id.asc())).all()
-    rows = build_account_discovery_matrix([_finding_dict(f) for f in findings])
+    finding_dicts = [_finding_dict(f) for f in findings]
+    rows = build_account_discovery_matrix(finding_dicts)
     found = [row for row in rows if row["status"] == "FOUND"]
     possible = [row for row in rows if row["status"] == "POSSIBLE"]
     unknown = [row for row in rows if row["status"] in {"UNKNOWN", "NO PUBLIC EVIDENCE"}]
@@ -61,6 +40,24 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
     emailrep_profiles = [f for f in findings if f.source == "EmailRep" and f.finding_type == "profile_observation"]
     public_profiles = [f for f in findings if f.source == "Public Profile Network" and f.finding_type == "profile_candidate"]
     exposure_signals = [f.value for f in findings if f.finding_type == "exposure_signal"]
+
+    activity: list[dict] = []
+    for row in rows:
+        if row["status"] not in {"FOUND", "POSSIBLE"}:
+            continue
+        evidence = row.get("evidence") or []
+        first = evidence[0] if evidence else {}
+        activity.append({
+            "service": row["service"],
+            "category": row["category"],
+            "status": row["status"],
+            "title": f"{row['service']} profile discovered" if row["status"] == "POSSIBLE" else f"{row['service']} linked to email",
+            "detail": row.get("identifier") or "Public profile observation",
+            "source_url": first.get("source_url"),
+            "at": first.get("collected_at"),
+        })
+    activity.sort(key=lambda item: item.get("at") or "", reverse=True)
+
     return {
         "investigation_id": inv_id,
         "target": inv.target,
@@ -71,7 +68,8 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
         "execution_attempt_id": inv.execution_attempt_id,
         "summary": {
             "services_checked": len(rows),
-            "accounts_found": len(found),
+            "accounts_found": len(found) + len(possible),
+            "confirmed_accounts": len(found),
             "possible_accounts": len(possible),
             "unknown_accounts": len(unknown),
             "emailrep_profiles": len(emailrep_profiles),
@@ -80,23 +78,17 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
             "exposure_signals": exposure_signals,
         },
         "provider_execution_status": [
-            {
-                "provider": f.source,
-                "status": f.value,
-                "checked_at": f.collected_at,
-                "message": f.notes,
-                "finding_id": f.id,
-                "execution_id": f.execution_id,
-                "execution_attempt_id": f.execution_attempt_id,
-            }
-            for f in findings
-            if f.finding_type == "provider_status"
+            {"provider": f.source, "status": f.value, "checked_at": f.collected_at, "message": f.notes, "finding_id": f.id, "execution_id": f.execution_id, "execution_attempt_id": f.execution_attempt_id}
+            for f in findings if f.finding_type == "provider_status"
         ],
+        "activity_timeline": activity,
         "semantics": {
             "status": "operational_status_and_evidence_state_are_separate",
             "identity": "correlation_does_not_confirm_identity",
+            "accounts_found": "public accounts includes FOUND email-associated profiles and POSSIBLE profiles discovered from the derived username",
+            "confirmed_accounts": "FOUND only; a source directly associated the email with the profile",
             "negative_results": "no_public_evidence_is_not_account_nonexistence",
-            "unsupported": "unsupported_services_are_not_checked_and_are_not_negative_findings",
+            "unsupported": "unsupported services are not checked and are not negative findings",
             "emailrep": "EmailRep profile observations are source-associated evidence and do not independently prove account ownership",
             "public_profiles": "public profile observations prove the public profile exists for the derived username; the email-to-profile relationship remains a possible correlation unless independently corroborated",
             "attempt_scope": "only_findings_from_the_current_execution_attempt_are_projected",
