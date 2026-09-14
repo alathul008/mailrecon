@@ -9,10 +9,11 @@ from app.osint.email import EVIDENCE_CORROBORATED, EVIDENCE_OBSERVED, EVIDENCE_S
 from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
+from app.providers.public_profile_network import PublicProfileNetworkProvider
 
 
 class EmailIntelligenceProvider:
-    """Free email-centric enrichment: EmailRep reputation/profiles + XposedOrNot breaches."""
+    """Email-centric enrichment: reputation, breach metadata and passive profile discovery."""
 
     name = "Email Intelligence"
 
@@ -42,7 +43,7 @@ class EmailIntelligenceProvider:
         findings: list[dict] = []
         successes = 0
         messages: list[str] = []
-        headers = {"accept": "application/json", "user-agent": "MailRecon/1.1 email intelligence"}
+        headers = {"accept": "application/json", "user-agent": "MailRecon/1.2 email intelligence"}
         if settings.emailrep_api_key:
             headers["Key"] = settings.emailrep_api_key
 
@@ -114,7 +115,7 @@ class EmailIntelligenceProvider:
             xon_url = f"https://api.xposedornot.com/v1/check-email/{quote(context.email, safe='')}"
             xon, xon_failure = await self._get_json(
                 xon_url,
-                {"accept": "application/json", "user-agent": "MailRecon/1.1 breach intelligence"},
+                {"accept": "application/json", "user-agent": "MailRecon/1.2 breach intelligence"},
                 not_found_ok=True,
             )
             if xon_failure:
@@ -158,9 +159,19 @@ class EmailIntelligenceProvider:
             else:
                 messages.append("XposedOrNot returned an unexpected response shape")
 
+            # Free passive username discovery is part of email intelligence: it
+            # turns the email local-part into concrete public-profile observations
+            # without login, password-reset, credential or authenticated probing.
+            profile_result = await PublicProfileNetworkProvider().run(context)
+            findings.extend(profile_result.findings)
+            if profile_result.status == "ok":
+                successes += 1
+            if profile_result.message:
+                messages.append(f"Public profiles: {profile_result.message}")
+
             if successes == 0:
                 return ProviderResult(self.name, "unavailable", findings=findings, message="; ".join(messages) or "Email intelligence sources were unavailable")
-            status_message = "EmailRep and XposedOrNot completed" if successes == 2 else f"{successes}/2 email intelligence sources completed"
+            status_message = f"{successes}/3 email intelligence sources completed"
             if messages:
                 status_message += "; " + "; ".join(messages)
             return ProviderResult(self.name, "ok", findings=findings, message=status_message)

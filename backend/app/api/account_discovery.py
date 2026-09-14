@@ -59,6 +59,7 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
     unknown = [row for row in rows if row["status"] in {"UNKNOWN", "NO PUBLIC EVIDENCE"}]
     exposure_findings = [f for f in findings if f.finding_type == "breach"]
     emailrep_profiles = [f for f in findings if f.source == "EmailRep" and f.finding_type == "profile_observation"]
+    public_profiles = [f for f in findings if f.source == "Public Profile Network" and f.finding_type == "profile_candidate"]
     exposure_signals = [f.value for f in findings if f.finding_type == "exposure_signal"]
     return {
         "investigation_id": inv_id,
@@ -74,6 +75,7 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
             "possible_accounts": len(possible),
             "unknown_accounts": len(unknown),
             "emailrep_profiles": len(emailrep_profiles),
+            "public_profiles_observed": len(public_profiles),
             "breaches_found": len(exposure_findings),
             "exposure_signals": exposure_signals,
         },
@@ -96,6 +98,7 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
             "negative_results": "no_public_evidence_is_not_account_nonexistence",
             "unsupported": "unsupported_services_are_not_checked_and_are_not_negative_findings",
             "emailrep": "EmailRep profile observations are source-associated evidence and do not independently prove account ownership",
+            "public_profiles": "public profile observations prove the public profile exists for the derived username; the email-to-profile relationship remains a possible correlation unless independently corroborated",
             "attempt_scope": "only_findings_from_the_current_execution_attempt_are_projected",
         },
         "services": rows,
