@@ -12,7 +12,7 @@ from app.providers.hibp import HIBPProvider
 from app.providers.public_web import PublicWebProvider
 from app.providers.rdap import RDAPProvider
 
-OPERATIONAL_STATES = ("ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled")
+OPERATIONAL_STATES = ("ok", "unconfigured", "rate_limited", "unavailable", "error", "disabled", "resource_limited")
 INVOCATION_MODES = ("email", "domain", "candidates")
 
 
