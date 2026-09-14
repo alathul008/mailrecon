@@ -13,12 +13,7 @@ from app.providers.network import pinned_transport
 
 
 class PublicProfileNetworkProvider:
-    """Passive username-based discovery across public profile networks.
-
-    A positive result means that a public profile exists for the derived
-    username. It is deliberately POSSIBLE evidence: username reuse alone does
-    not establish that the profile belongs to the email owner.
-    """
+    """Passive username-based discovery across public profile networks."""
 
     name = "Public Profile Network"
 
@@ -65,6 +60,7 @@ class PublicProfileNetworkProvider:
 
     async def _probe(self, service: str, username: str) -> tuple[str, str, str, dict | None, str | None]:
         encoded = quote(username, safe="")
+        url = ""
         try:
             if service == "Reddit":
                 status, data, message = await self._json_probe(service, f"https://www.reddit.com/user/{encoded}/about.json")
@@ -87,35 +83,15 @@ class PublicProfileNetworkProvider:
             elif service == "Hugging Face":
                 status, data, message = await self._json_probe(service, f"https://huggingface.co/api/users/{encoded}")
                 url = f"https://huggingface.co/{encoded}"
-            elif service == "npm":
-                status, data, message = await self._json_probe(service, f"https://registry.npmjs.org/-/user/org.couchdb.user:{encoded}")
-                url = f"https://www.npmjs.com/~{encoded}"
-            elif service == "Stack Overflow":
-                status, data, message = await self._json_probe(
-                    service,
-                    "https://api.stackexchange.com/2.3/users",
-                    params={"site": "stackoverflow", "inname": username, "pagesize": "20"},
-                )
-                if status == "found":
-                    items = data.get("items") if isinstance(data, dict) else None
-                    if not isinstance(items, list) or not any(
-                        isinstance(item, dict) and str(item.get("display_name", "")).casefold() == username.casefold()
-                        for item in items
-                    ):
-                        status = "not_found"
-                url = f"https://stackoverflow.com/users"
-            elif service == "Medium":
-                status, data, message = await self._page_probe(service, f"https://medium.com/@{encoded}")
-                url = f"https://medium.com/@{encoded}"
             else:
                 return service, "unknown", "", None, "Unsupported probe"
             return service, status, url, data, message
         except Exception as exc:
-            return service, "error", url if "url" in locals() else "", None, f"{service}: {type(exc).__name__}"
+            return service, "error", url, None, f"{service}: {type(exc).__name__}"
 
     async def run(self, context: ProviderContext) -> ProviderResult:
         username = context.candidates[0] if context.candidates else context.email.split("@", 1)[0]
-        services = ("Reddit", "Dev.to", "Codeberg", "Keybase", "Hugging Face", "npm", "Stack Overflow", "Medium")
+        services = ("Reddit", "Dev.to", "Codeberg", "Keybase", "Hugging Face")
         results = await asyncio.gather(*(self._probe(service, username) for service in services))
         findings: list[dict] = []
         found = 0
@@ -127,7 +103,7 @@ class PublicProfileNetworkProvider:
                 findings.append(
                     finding(
                         self.name,
-                        "profile_candidate",
+                        "public_profile",
                         username,
                         0.72,
                         "info",
