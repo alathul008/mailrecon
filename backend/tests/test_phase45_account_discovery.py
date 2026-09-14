@@ -4,7 +4,7 @@ from app.osint.service_catalog import build_account_discovery_matrix
 from app.providers.public_profile_network import PublicProfileNetworkProvider
 
 
-def _finding(source, finding_type, value, confidence=0.72, evidence_state="possible_match", source_url="https://dev.to/user"):
+def _finding(source, finding_type, value, confidence=0.72, evidence_state="observed", source_url="https://dev.to/user"):
     return {
         "id": 1,
         "source": source,
@@ -21,7 +21,7 @@ def _finding(source, finding_type, value, confidence=0.72, evidence_state="possi
 def test_public_profile_rows_are_possible_not_found():
     rows = build_account_discovery_matrix([
         _finding("Email Intelligence", "provider_status", "ok"),
-        _finding("Public Profile Network", "public_profile", "user", source_url="https://dev.to/user"),
+        _finding("Public Profile Network", "profile_candidate", "user", source_url="https://dev.to/user"),
     ])
     row = next(row for row in rows if row["service"] == "Dev.to")
     assert row["status"] == "POSSIBLE"
@@ -41,6 +41,6 @@ async def test_public_profile_network_maps_successful_services(monkeypatch):
         type("Context", (), {"email": "alice@example.com", "domain": "example.com", "candidates": ("alice",)})()
     )
     assert result.status == "ok"
-    profiles = [f for f in result.findings if f["finding_type"] == "public_profile"]
+    profiles = [f for f in result.findings if f["finding_type"] == "profile_candidate"]
     assert {f["source_url"] for f in profiles} == {"https://dev.to/alice", "https://huggingface.co/alice"}
-    assert all(f["evidence_state"] == "possible_match" for f in profiles)
+    assert all(f["evidence_state"] == "observed" for f in profiles)
