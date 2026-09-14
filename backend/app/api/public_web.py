@@ -6,7 +6,7 @@ from app.osint.email import analyze_email, username_candidates
 from app.providers.base import ProviderContext, ProviderResult
 from app.providers.public_web import PublicWebProvider
 from app.providers.registry import execute, provider_definition
-from app.services.resource_budget import ExecutionResourceBudget
+from app.services.resource_budget import ExecutionResourceBudget, bind_accounting
 
 router = APIRouter(prefix="/api")
 
@@ -34,7 +34,9 @@ async def public_web_discovery(
         estimated_external_requests=query_count,
     )
     context = ProviderContext(email=analysis["email"], domain=analysis["domain"], candidates=selected_candidates)
-    result = await execute(provider_definition("Public Web"), context=context, factory=PublicWebProvider)
+    accounting = budget.accounting()
+    with bind_accounting(accounting):
+        result = await execute(provider_definition("Public Web"), context=context, factory=PublicWebProvider)
     return {
         "provider": result.provider,
         "status": result.status,
