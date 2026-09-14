@@ -1,5 +1,4 @@
 from functools import lru_cache
-
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,6 +31,8 @@ class Settings(BaseSettings):
     max_queue_depth: int = 100
     max_investigations_per_window: int = 10
     investigation_rate_window_seconds: float = 60.0
+    max_public_web_requests_per_window: int = 10
+    public_web_rate_window_seconds: float = 60.0
     request_timeout_seconds: float = 10.0
     execution_lease_seconds: int = 60
     worker_poll_interval_seconds: float = 0.5

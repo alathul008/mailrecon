@@ -9,7 +9,10 @@ ALLOWED_SCHEMES = {"https"}
 
 def _is_public_ip(value: str) -> bool:
     ip = ipaddress.ip_address(value)
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+    # External provider traffic is restricted to globally routable destinations.
+    # This rejects private, loopback, link-local, multicast, reserved,
+    # unspecified, documentation, and shared-address space such as 100.64/10.
+    return ip.is_global
 
 
 def resolve_public_addresses(host: str, port: int = 443) -> tuple[str, ...]:

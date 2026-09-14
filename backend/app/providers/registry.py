@@ -36,6 +36,7 @@ class ProviderDefinition:
     factory: ProviderFactory | None = None
     argument_mode: str = "email"
     module: str | None = None
+    max_findings: int = 100
 
     @property
     def executable(self) -> bool:
@@ -43,13 +44,12 @@ class ProviderDefinition:
 
 
 PROVIDER_REGISTRY: tuple[ProviderDefinition, ...] = (
-    ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar"),
-    ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap"),
-    ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery"),
-    ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab"),
-    ProviderDefinition("Have I Been Pwned", "Other", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources"),
-    ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web"),
-    # DNS is an orchestrator-owned local module, not an executable ProviderRunner.
+    ProviderDefinition("Gravatar", "Avatar", True, ("public_hash_lookup",), "none", True, True, True, GravatarProvider, "email", "gravatar", 10),
+    ProviderDefinition("RDAP", "Network", True, ("rdap_lookup",), "none", True, False, True, RDAPProvider, "domain", "rdap", 50),
+    ProviderDefinition("GitHub", "Developer", True, ("public_profile_api",), "optional GITHUB_TOKEN", True, True, True, GitHubProvider, "candidates", "public_profile_discovery", 4),
+    ProviderDefinition("GitLab", "Developer", True, ("public_profile_api",), "none", True, True, True, GitLabProvider, "email", "gitlab", 20),
+    ProviderDefinition("Have I Been Pwned", "Other", True, ("breach_metadata_api",), "optional HIBP_API_KEY", True, True, True, HIBPProvider, "email", "breach_sources", 100),
+    ProviderDefinition("Public Web", "Other", True, ("public_search_api",), "optional PUBLIC_WEB_SEARCH_URL", True, True, True, PublicWebProvider, "candidates", "public_web", 50),
     ProviderDefinition("DNS", "Network", True, ("dns_resolution",), "none", True, False, True),
     ProviderDefinition("Ollama", "Local AI", True, ("local_model_api",), "optional local model", False, False, False),
 )
@@ -112,6 +112,9 @@ async def execute(
         raise TypeError(f"Provider {definition.name} returned {type(result).__name__}, expected ProviderResult")
     if result.provider != definition.name:
         raise ValueError(f"Provider {definition.name} returned result for {result.provider}")
+    if len(result.findings) > definition.max_findings:
+        result.findings = result.findings[:definition.max_findings]
+        result.message = f"{result.message or 'Provider execution completed.'} Result limit applied: retained at most {definition.max_findings} findings."
     return result
 
 
@@ -122,6 +125,8 @@ def validate_registry() -> None:
     for item in PROVIDER_REGISTRY:
         if item.argument_mode not in INVOCATION_MODES:
             raise ValueError(f"Provider {item.name} has unsupported invocation mode")
+        if item.max_findings < 1:
+            raise ValueError(f"Provider {item.name} must have a positive finding limit")
         if item.account_discovery and not item.supported:
             raise ValueError(f"Account-discovery provider {item.name} must be supported")
         if item.account_discovery and item.factory is None:

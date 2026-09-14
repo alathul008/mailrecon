@@ -5,7 +5,7 @@ import httpx
 from app.core.config import get_settings
 from app.osint.email import EVIDENCE_OBSERVED
 from app.providers.base import ProviderContext, ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 
 
@@ -66,7 +66,7 @@ class RDAPProvider:
         try:
             validate_provider_url(url)
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
-                response = await client.get(url)
+                response = await bounded_get(client, url)
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No public RDAP registration returned")
             failure = classify_response(self.name, response)

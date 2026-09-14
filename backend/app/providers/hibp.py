@@ -4,7 +4,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.providers.base import ProviderContext, ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 
 
@@ -20,7 +20,7 @@ class HIBPProvider:
         try:
             validate_provider_url(url)
             async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, headers=headers, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
-                response = await client.get(url, params={"truncateResponse": "false"})
+                response = await bounded_get(client, url, params={"truncateResponse": "false"})
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No known breaches returned by HIBP")
             failure = classify_response(self.name, response)

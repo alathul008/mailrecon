@@ -7,6 +7,54 @@ from app.core.security import validate_external_url
 from app.providers.base import ProviderResult
 
 
+MAX_EXTERNAL_RESPONSE_BYTES = 8 * 1024 * 1024
+
+
+class ResponseTooLargeError(ValueError):
+    """An external response exceeded the project-wide response byte budget."""
+
+
+async def bounded_get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:
+    """GET an external resource without allowing an oversized body into parsing.
+
+    8 MiB is intentionally large enough for the current passive JSON providers
+    while keeping unexpected/chunked responses bounded before JSON/text parsing.
+    Content-Length is rejected early; streamed bodies are counted as received.
+    The small ``get`` fallback exists only for lightweight test doubles used by
+    legacy provider tests; real httpx clients always use the streaming path.
+    """
+    if not hasattr(client, "stream"):
+        response = await client.get(url, **kwargs)
+        if len(response.content) > MAX_EXTERNAL_RESPONSE_BYTES:
+            raise ResponseTooLargeError("External response exceeded the response-size budget")
+        return response
+
+    async with client.stream("GET", url, **kwargs) as response:
+        content_length = response.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared = int(content_length)
+            except ValueError as exc:
+                raise ResponseTooLargeError("External response declared an invalid Content-Length") from exc
+            if declared < 0 or declared > MAX_EXTERNAL_RESPONSE_BYTES:
+                raise ResponseTooLargeError("External response exceeded the response-size budget")
+
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > MAX_EXTERNAL_RESPONSE_BYTES:
+                raise ResponseTooLargeError("External response exceeded the response-size budget")
+            chunks.append(chunk)
+        return httpx.Response(
+            status_code=response.status_code,
+            headers=response.headers,
+            content=b"".join(chunks),
+            request=response.request,
+            extensions=response.extensions,
+        )
+
+
 def classify_exception(provider: str, exc: Exception) -> ProviderResult:
     if isinstance(exc, httpx.TimeoutException):
         status = "unavailable"

@@ -5,7 +5,7 @@ import httpx
 from app.core.config import get_settings
 from app.osint.email import EVIDENCE_CORROBORATED
 from app.providers.base import ProviderContext, ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 
 
@@ -26,7 +26,7 @@ class GitLabProvider:
                 trust_env=False,
                 transport=pinned_transport(self.endpoint),
             ) as client:
-                response = await client.get(self.endpoint, params={"search": context.email})
+                response = await bounded_get(client, self.endpoint, params={"search": context.email})
             failure = classify_response(self.name, response)
             if failure:
                 return failure

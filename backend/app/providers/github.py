@@ -2,7 +2,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.providers.base import ProviderContext, ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 from app.osint.email import EVIDENCE_CORROBORATED, EVIDENCE_POSSIBLE
 
@@ -21,7 +21,7 @@ class GitHubProvider:
                 url = f"https://api.github.com/users/{username}"
                 validate_provider_url(url)
                 async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, headers=headers, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
-                    response = await client.get(url)
+                    response = await bounded_get(client, url)
                 if response.status_code == 404:
                     continue
                 failure = classify_response(self.name, response)
