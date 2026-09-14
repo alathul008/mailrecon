@@ -6,7 +6,7 @@ import httpx
 from app.core.config import get_settings
 from app.osint.email import EVIDENCE_POSSIBLE
 from app.providers.base import ProviderContext, ProviderResult, finding
-from app.providers.http import classify_exception, classify_response, parse_json, validate_provider_url
+from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
 from app.services.resource_budget import ExecutionResourceBudget
 
@@ -88,7 +88,7 @@ class PublicWebProvider:
                 for query, query_type in queries:
                     url = f"{endpoint}?q={quote_plus(query)}&format=json"
                     validate_provider_url(url)
-                    response = await client.get(url)
+                    response = await bounded_get(client, url)
                     failure = classify_response(self.name, response)
                     if failure:
                         return failure
