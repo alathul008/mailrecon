@@ -1,27 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Activity, ExternalLink, Fingerprint, Globe2, Link2, ShieldAlert, Sparkles } from 'lucide-react';
 import type { AccountDiscovery as AccountDiscoveryData } from '../services/api';
 
 type Props = { data: AccountDiscoveryData | null; loading: boolean; error: string };
 
 const tones: Record<string, string> = {
-  FOUND: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20',
-  POSSIBLE: 'text-amber-300 bg-amber-500/10 border-amber-500/20',
-  'NO PUBLIC EVIDENCE': 'text-zinc-500 bg-white/[.02] border-white/8',
-  UNAVAILABLE: 'text-zinc-500 bg-white/[.02] border-white/8',
-  UNCONFIGURED: 'text-orange-300 bg-orange-500/10 border-orange-500/20',
-  'RATE LIMITED': 'text-orange-300 bg-orange-500/10 border-orange-500/20',
-  ERROR: 'text-red-300 bg-red-500/10 border-red-500/20',
-  UNKNOWN: 'text-zinc-400 bg-white/[.02] border-white/8',
+  FOUND: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20', POSSIBLE: 'text-amber-300 bg-amber-500/10 border-amber-500/20', 'NO PUBLIC EVIDENCE': 'text-zinc-500 bg-white/[.02] border-white/8', UNAVAILABLE: 'text-zinc-500 bg-white/[.02] border-white/8', UNCONFIGURED: 'text-orange-300 bg-orange-500/10 border-orange-500/20', 'RATE LIMITED': 'text-orange-300 bg-orange-500/10 border-orange-500/20', ERROR: 'text-red-300 bg-red-500/10 border-red-500/20', UNKNOWN: 'text-zinc-400 bg-white/[.02] border-white/8',
 };
-
-function Status({ value }: { value: string }) {
-  return <span className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[.08em] ${tones[value] || tones.UNKNOWN}`}>{value}</span>;
-}
-
-function serviceInitial(service: string) {
-  return service.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'OS';
-}
+function Status({ value }: { value: string }) { return <span className={`rounded-full border px-2.5 py-1 text-[10px] font-medium uppercase tracking-[.08em] ${tones[value] || tones.UNKNOWN}`}>{value}</span>; }
+function serviceInitial(service: string) { return service.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() || 'OS'; }
 
 export function AccountDiscovery({ data, loading, error }: Props) {
   const [tab, setTab] = useState<'overview' | 'accounts' | 'activity' | 'coverage'>('overview');
@@ -33,81 +20,22 @@ export function AccountDiscovery({ data, loading, error }: Props) {
   const confirmed = accounts.filter(row => row.status === 'FOUND');
   const possible = accounts.filter(row => row.status === 'POSSIBLE');
   const links = accounts.flatMap(row => row.evidence.filter(e => e.source_url).map(e => ({ ...e, service: row.service, category: row.category, status: row.status, identifier: row.identifier })));
-  const categories = useMemo(() => Array.from(new Set(accounts.map(row => row.category))), [accounts]);
-
-  const summaryText = data.summary.accounts_found === 0
-    ? 'No public profile association was observed from the configured sources. A negative result is not proof that an account does not exist.'
-    : `Observed ${data.summary.accounts_found} public account${data.summary.accounts_found === 1 ? '' : 's'} for the derived handle ${data.username || '—'} across ${data.summary.services_checked} sources. ${data.summary.confirmed_accounts} are directly email-associated and ${data.summary.possible_accounts} are username correlations.`;
+  const categories = Array.from(new Set(accounts.map(row => row.category)));
+  const summaryText = data.summary.accounts_found === 0 ? 'No public profile association was observed from the configured sources. A negative result is not proof that an account does not exist.' : `Observed ${data.summary.accounts_found} public account${data.summary.accounts_found === 1 ? '' : 's'} for the derived handle ${data.username || '—'} across ${data.summary.services_checked} sources. ${data.summary.confirmed_accounts} are directly email-associated and ${data.summary.possible_accounts} are username correlations.`;
 
   return <div className="space-y-5">
     <section className="overflow-hidden rounded-2xl border border-white/8 bg-[#111011] shadow-2xl shadow-black/20">
-      <div className="border-b border-white/8 bg-gradient-to-r from-red-500/[.08] via-transparent to-transparent px-5 py-5 lg:px-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-red-400"><Fingerprint size={13}/> Email identity profile</div>
-            <h2 className="mt-2 break-all text-xl font-semibold tracking-tight text-white">{data.normalized_email || data.target}</h2>
-            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500"><span>Username: <strong className="font-medium text-zinc-300">{data.username || '—'}</strong></span><span>Domain: <strong className="font-medium text-zinc-300">{data.domain || '—'}</strong></span></div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-            {[
-              ['Accounts found', data.summary.accounts_found],
-              ['Confirmed', data.summary.confirmed_accounts],
-              ['Possible', data.summary.possible_accounts],
-              ['Profile links', links.length],
-              ['Breaches', data.summary.breaches_found],
-            ].map(([label, value]) => <div key={label} className="min-w-[88px] rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-center"><div className="text-xl font-semibold text-white">{value}</div><div className="mt-1 text-[9px] uppercase tracking-[.12em] text-zinc-600">{label}</div></div>)}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex overflow-x-auto border-b border-white/8 px-3 lg:px-5">
-        {([
-          ['overview', 'Overview'], ['accounts', `Linked accounts (${accounts.length})`], ['activity', 'Activity timeline'], ['coverage', `Sources (${data.summary.services_checked})`],
-        ] as const).map(([value, label]) => <button key={value} onClick={() => setTab(value)} className={`whitespace-nowrap border-b-2 px-4 py-3 text-xs font-medium transition ${tab === value ? 'border-red-400 text-white' : 'border-transparent text-zinc-600 hover:text-zinc-300'}`}>{label}</button>)}
-      </div>
-
-      {tab === 'overview' && <div className="space-y-5 p-5 lg:p-6">
-        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-          <div className="rounded-2xl border border-white/8 bg-black/15 p-5">
-            <div className="flex items-center gap-2 text-sm font-medium"><Sparkles size={15} className="text-red-400"/> Analyst synthesis</div>
-            <p className="mt-3 text-sm leading-6 text-zinc-400">{summaryText}</p>
-            <div className="mt-4 flex flex-wrap gap-2"><span className="rounded-full border border-white/8 px-2.5 py-1 text-[10px] text-zinc-500">Passive sources only</span><span className="rounded-full border border-white/8 px-2.5 py-1 text-[10px] text-zinc-500">No login/reset probing</span>{data.summary.exposure_signals.map(signal => <span key={signal} className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-[10px] text-red-300">{signal.replaceAll('_', ' ')}</span>)}</div>
-          </div>
-          <div className="rounded-2xl border border-white/8 bg-black/15 p-5">
-            <div className="flex items-center gap-2 text-sm font-medium"><Activity size={15} className="text-red-400"/> Scan snapshot</div>
-            <div className="mt-4 space-y-3 text-xs"><div className="flex justify-between gap-4"><span className="text-zinc-600">Sources checked</span><strong>{data.summary.services_checked}</strong></div><div className="flex justify-between gap-4"><span className="text-zinc-600">Public profiles</span><strong>{data.summary.public_profiles_observed}</strong></div><div className="flex justify-between gap-4"><span className="text-zinc-600">Email-linked profiles</span><strong>{data.summary.emailrep_profiles}</strong></div><div className="flex justify-between gap-4"><span className="text-zinc-600">Breach sources</span><strong>{data.summary.breaches_found}</strong></div></div>
-          </div>
-        </div>
-
-        <div>
-          <div className="flex items-end justify-between"><div><div className="text-[10px] uppercase tracking-[.18em] text-zinc-600">Linked accounts</div><h3 className="mt-1 text-lg font-semibold">Public footprint</h3></div><button onClick={() => setTab('accounts')} className="text-xs text-red-300 hover:text-red-200">View all</button></div>
-          {accounts.length === 0 ? <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-5 text-sm text-zinc-600">No public accounts found yet.</div> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{accounts.slice(0, 6).map(row => <AccountCard key={`${row.provider}-${row.service}`} row={row}/>)}</div>}
-        </div>
-
-        <div>
-          <div className="flex items-end justify-between"><div><div className="text-[10px] uppercase tracking-[.18em] text-zinc-600">Profile links</div><h3 className="mt-1 text-lg font-semibold">Direct public references</h3></div><span className="text-xs text-zinc-600">{links.length} links</span></div>
-          <div className="mt-3 grid gap-2 md:grid-cols-2">{links.slice(0, 8).map((link, index) => <a key={`${link.source_url}-${index}`} href={link.source_url || '#'} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/15 p-3 transition hover:border-white/15 hover:bg-white/[.03]"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[.04] text-[10px] font-semibold text-zinc-400">{serviceInitial(link.service)}</span><span className="min-w-0 flex-1"><span className="block text-sm text-zinc-200">{link.service}</span><span className="block truncate text-[11px] text-zinc-600">{link.source_url}</span></span><ExternalLink size={14} className="shrink-0 text-zinc-600"/></a>)}</div>
-        </div>
-      </div>}
-
-      {tab === 'accounts' && <div className="p-5 lg:p-6">
-        <div className="mb-4 flex flex-wrap gap-2"><span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] text-emerald-300">{confirmed.length} email-linked</span><span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] text-amber-300">{possible.length} possible</span>{categories.map(category => <span key={category} className="rounded-full border border-white/8 px-3 py-1 text-[10px] text-zinc-500">{category}</span>)}</div>
-        {accounts.length === 0 ? <div className="rounded-xl border border-white/8 p-6 text-sm text-zinc-600">No public account associations were observed.</div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{accounts.map(row => <AccountCard key={`${row.provider}-${row.service}`} row={row}/>)}</div>}
-      </div>}
-
+      <div className="border-b border-white/8 bg-gradient-to-r from-red-500/[.08] via-transparent to-transparent px-5 py-5 lg:px-6"><div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-red-400"><Fingerprint size={13}/> Email identity profile</div><h2 className="mt-2 break-all text-xl font-semibold tracking-tight text-white">{data.normalized_email || data.target}</h2><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-500"><span>Username: <strong className="font-medium text-zinc-300">{data.username || '—'}</strong></span><span>Domain: <strong className="font-medium text-zinc-300">{data.domain || '—'}</strong></span></div></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-5">{[['Accounts found', data.summary.accounts_found], ['Confirmed', data.summary.confirmed_accounts], ['Possible', data.summary.possible_accounts], ['Profile links', links.length], ['Breaches', data.summary.breaches_found]].map(([label, value]) => <div key={label} className="min-w-[88px] rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-center"><div className="text-xl font-semibold text-white">{value}</div><div className="mt-1 text-[9px] uppercase tracking-[.12em] text-zinc-600">{label}</div></div>)}</div></div></div>
+      <div className="flex overflow-x-auto border-b border-white/8 px-3 lg:px-5">{([['overview', 'Overview'], ['accounts', `Linked accounts (${accounts.length})`], ['activity', 'Activity timeline'], ['coverage', `Sources (${data.summary.services_checked})`]] as const).map(([value, label]) => <button key={value} onClick={() => setTab(value)} className={`whitespace-nowrap border-b-2 px-4 py-3 text-xs font-medium transition ${tab === value ? 'border-red-400 text-white' : 'border-transparent text-zinc-600 hover:text-zinc-300'}`}>{label}</button>)}</div>
+      {tab === 'overview' && <div className="space-y-5 p-5 lg:p-6"><div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]"><div className="rounded-2xl border border-white/8 bg-black/15 p-5"><div className="flex items-center gap-2 text-sm font-medium"><Sparkles size={15} className="text-red-400"/> Analyst synthesis</div><p className="mt-3 text-sm leading-6 text-zinc-400">{summaryText}</p><div className="mt-4 flex flex-wrap gap-2"><span className="rounded-full border border-white/8 px-2.5 py-1 text-[10px] text-zinc-500">Passive sources only</span><span className="rounded-full border border-white/8 px-2.5 py-1 text-[10px] text-zinc-500">No login/reset probing</span>{data.summary.exposure_signals.map(signal => <span key={signal} className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-1 text-[10px] text-red-300">{signal.replaceAll('_', ' ')}</span>)}</div></div><div className="rounded-2xl border border-white/8 bg-black/15 p-5"><div className="flex items-center gap-2 text-sm font-medium"><Activity size={15} className="text-red-400"/> Scan snapshot</div><div className="mt-4 space-y-3 text-xs"><div className="flex justify-between gap-4"><span className="text-zinc-600">Sources checked</span><strong>{data.summary.services_checked}</strong></div><div className="flex justify-between gap-4"><span className="text-zinc-600">Public profiles</span><strong>{data.summary.public_profiles_observed}</strong></div><div className="flex justify-between gap-4"><span className="text-zinc-600">Email-linked profiles</span><strong>{data.summary.emailrep_profiles}</strong></div><div className="flex justify-between gap-4"><span className="text-zinc-600">Breach sources</span><strong>{data.summary.breaches_found}</strong></div></div></div></div><div><div className="flex items-end justify-between"><div><div className="text-[10px] uppercase tracking-[.18em] text-zinc-600">Linked accounts</div><h3 className="mt-1 text-lg font-semibold">Public footprint</h3></div><button onClick={() => setTab('accounts')} className="text-xs text-red-300 hover:text-red-200">View all</button></div>{accounts.length === 0 ? <div className="mt-3 rounded-xl border border-white/8 bg-black/15 p-5 text-sm text-zinc-600">No public accounts found yet.</div> : <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{accounts.slice(0, 6).map(row => <AccountCard key={`${row.provider}-${row.service}`} row={row}/>)}</div>}</div><div><div className="flex items-end justify-between"><div><div className="text-[10px] uppercase tracking-[.18em] text-zinc-600">Profile links</div><h3 className="mt-1 text-lg font-semibold">Direct public references</h3></div><span className="text-xs text-zinc-600">{links.length} links</span></div><div className="mt-3 grid gap-2 md:grid-cols-2">{links.slice(0, 8).map((link, index) => <a key={`${link.source_url}-${index}`} href={link.source_url || '#'} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl border border-white/8 bg-black/15 p-3 transition hover:border-white/15 hover:bg-white/[.03]"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-white/[.04] text-[10px] font-semibold text-zinc-400">{serviceInitial(link.service)}</span><span className="min-w-0 flex-1"><span className="block text-sm text-zinc-200">{link.service}</span><span className="block truncate text-[11px] text-zinc-600">{link.source_url}</span></span><ExternalLink size={14} className="shrink-0 text-zinc-600"/></a>)}</div></div></div>}
+      {tab === 'accounts' && <div className="p-5 lg:p-6"><div className="mb-4 flex flex-wrap gap-2"><span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[10px] text-emerald-300">{confirmed.length} email-linked</span><span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[10px] text-amber-300">{possible.length} possible</span>{categories.map(category => <span key={category} className="rounded-full border border-white/8 px-3 py-1 text-[10px] text-zinc-500">{category}</span>)}</div>{accounts.length === 0 ? <div className="rounded-xl border border-white/8 p-6 text-sm text-zinc-600">No public account associations were observed.</div> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{accounts.map(row => <AccountCard key={`${row.provider}-${row.service}`} row={row}/>)}</div>}</div>}
       {tab === 'activity' && <div className="p-5 lg:p-6"><div className="mb-5 flex items-center gap-2 text-sm font-medium"><Activity size={15} className="text-red-400"/> Discovery activity</div>{data.activity_timeline.length === 0 ? <div className="rounded-xl border border-white/8 p-6 text-sm text-zinc-600">No account discovery events were recorded.</div> : <div className="relative ml-2 border-l border-white/8 pl-6">{data.activity_timeline.map((event, index) => <div key={`${event.service}-${index}`} className="relative mb-6 last:mb-0"><span className="absolute -left-[31px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-[#111011] bg-red-400"/><div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">{event.title}</span><Status value={event.status}/></div><div className="mt-1 text-xs text-zinc-500">{event.service} · {event.detail}</div>{event.source_url && <a href={event.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[11px] text-red-300">Open source <ExternalLink size={11}/></a>}</div>)}</div>}</div>}
-
       {tab === 'coverage' && <div className="p-5 lg:p-6"><div className="mb-4 flex items-center gap-2 text-sm font-medium"><Globe2 size={15} className="text-red-400"/> Source coverage</div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.services.map(row => <div key={`${row.provider}-${row.service}`} className="rounded-xl border border-white/8 bg-black/15 p-3"><div className="flex items-center justify-between gap-2"><span className="text-sm text-zinc-300">{row.service}</span><Status value={row.status}/></div><div className="mt-2 text-[10px] text-zinc-600">{row.category} · {row.provider || 'catalog'}</div>{row.identifier && <div className="mt-2 truncate text-[11px] text-zinc-500">{row.identifier}</div>}</div>)}</div></div>}
     </section>
-
     <div className="flex items-start gap-3 rounded-xl border border-amber-500/10 bg-amber-500/[.04] p-4 text-xs leading-5 text-zinc-600"><ShieldAlert size={15} className="mt-0.5 shrink-0 text-amber-400"/><span><strong className="font-medium text-zinc-400">Evidence rule:</strong> FOUND means a source directly associated the email with a public profile. POSSIBLE means a public profile exists for the username derived from the email. Username reuse alone does not establish identity.</span></div>
   </div>;
 }
 
 function AccountCard({ row }: { row: AccountDiscoveryData['services'][number] }) {
-  return <article className="group rounded-2xl border border-white/8 bg-black/15 p-4 transition hover:border-white/15 hover:bg-white/[.025]">
-    <div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/[.04] text-[10px] font-semibold text-zinc-300">{serviceInitial(row.service)}</span><div className="min-w-0"><div className="truncate text-sm font-medium text-zinc-200">{row.service}</div><div className="mt-0.5 text-[10px] uppercase tracking-[.12em] text-zinc-600">{row.category}</div></div></div><Status value={row.status}/></div>
-    <div className="mt-4 flex items-center gap-2 text-sm text-zinc-300"><Link2 size={13} className="text-zinc-600"/>{row.identifier || 'Public profile observed'}</div>
-    {row.evidence.slice(0, 1).map((e, i) => <div key={i} className="mt-3 rounded-xl border border-white/7 bg-white/[.02] p-3"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.1em] text-zinc-600"><span>{e.evidence_state || 'observed'}</span>{typeof e.confidence === 'number' && <span>{Math.round(e.confidence * 100)}% confidence</span>}</div>{e.source_url && <a href={e.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200">Open profile <ExternalLink size={11}/></a>}</div>)}
-  </article>;
+  return <article className="group rounded-2xl border border-white/8 bg-black/15 p-4 transition hover:border-white/15 hover:bg-white/[.025]"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white/[.04] text-[10px] font-semibold text-zinc-300">{serviceInitial(row.service)}</span><div className="min-w-0"><div className="truncate text-sm font-medium text-zinc-200">{row.service}</div><div className="mt-0.5 text-[10px] uppercase tracking-[.12em] text-zinc-600">{row.category}</div></div></div><Status value={row.status}/></div><div className="mt-4 flex items-center gap-2 text-sm text-zinc-300"><Link2 size={13} className="text-zinc-600"/>{row.identifier || 'Public profile observed'}</div>{row.evidence.slice(0, 1).map((e, i) => <div key={i} className="mt-3 rounded-xl border border-white/7 bg-white/[.02] p-3"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.1em] text-zinc-600"><span>{e.evidence_state || 'observed'}</span>{typeof e.confidence === 'number' && <span>{Math.round(e.confidence * 100)}% confidence</span>}</div>{e.source_url && <a href={e.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[11px] text-red-300 hover:text-red-200">Open profile <ExternalLink size={11}/></a>}</div>)}</article>;
 }
