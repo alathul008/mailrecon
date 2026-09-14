@@ -31,7 +31,8 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
     if inv.execution_attempt_id:
         query = query.where(Finding.execution_attempt_id == inv.execution_attempt_id)
     findings = db.scalars(query.order_by(Finding.id.asc())).all()
-    rows = build_account_discovery_matrix([_finding_dict(f) for f in findings])
+    finding_dicts = [_finding_dict(f) for f in findings]
+    rows = build_account_discovery_matrix(finding_dicts)
     found = [row for row in rows if row["status"] == "FOUND"]
     possible = [row for row in rows if row["status"] == "POSSIBLE"]
     unknown = [row for row in rows if row["status"] in {"UNKNOWN", "NO PUBLIC EVIDENCE"}]
@@ -39,6 +40,24 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
     emailrep_profiles = [f for f in findings if f.source == "EmailRep" and f.finding_type == "profile_observation"]
     public_profiles = [f for f in findings if f.source == "Public Profile Network" and f.finding_type == "profile_candidate"]
     exposure_signals = [f.value for f in findings if f.finding_type == "exposure_signal"]
+
+    activity: list[dict] = []
+    for row in rows:
+        if row["status"] not in {"FOUND", "POSSIBLE"}:
+            continue
+        evidence = row.get("evidence") or []
+        first = evidence[0] if evidence else {}
+        activity.append({
+            "service": row["service"],
+            "category": row["category"],
+            "status": row["status"],
+            "title": f"{row['service']} profile discovered" if row["status"] == "POSSIBLE" else f"{row['service']} linked to email",
+            "detail": row.get("identifier") or "Public profile observation",
+            "source_url": first.get("source_url"),
+            "at": first.get("collected_at"),
+        })
+    activity.sort(key=lambda item: item.get("at") or "", reverse=True)
+
     return {
         "investigation_id": inv_id,
         "target": inv.target,
@@ -62,6 +81,7 @@ def account_discovery(inv_id: int, db: Session = Depends(get_db)):
             {"provider": f.source, "status": f.value, "checked_at": f.collected_at, "message": f.notes, "finding_id": f.id, "execution_id": f.execution_id, "execution_attempt_id": f.execution_attempt_id}
             for f in findings if f.finding_type == "provider_status"
         ],
+        "activity_timeline": activity,
         "semantics": {
             "status": "operational_status_and_evidence_state_are_separate",
             "identity": "correlation_does_not_confirm_identity",
