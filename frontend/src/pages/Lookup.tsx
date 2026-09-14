@@ -4,7 +4,6 @@ import {createInvestigation,deleteInvestigation,getAccountDiscovery,getApiKey,ge
 import type {AccountDiscovery as AccountDiscoveryData} from '../services/api';
 import type {Investigation,TimelineEvent} from '../types';
 import {AccountDiscovery} from '../components/AccountDiscovery';
-import {RiskCard} from '../components/RiskCard';
 import {RiskDimensions} from '../components/RiskDimensions';
 import {Graph} from './Graph';
 import {FindingsTable} from '../components/FindingsTable';
