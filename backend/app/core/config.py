@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     enable_ollama: bool = False
     privacy_mode: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    # Space-separated API origins permitted by the browser CSP connect-src
+    # directive. Keep this explicit rather than using a wildcard. Operators
+    # serving the frontend against a separately deployed API can override it
+    # with MAILRECON_CSP_CONNECT_SRC.
+    csp_connect_src: str = "http://127.0.0.1:8000 http://localhost:8000"
     # Keep the public environment variable stable while also accepting the
     # conventional API_KEY name for backwards/CLI compatibility.
     api_key: str | None = Field(
