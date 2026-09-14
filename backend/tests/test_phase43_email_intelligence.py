@@ -9,7 +9,7 @@ from app.providers.registry import provider_definition
 def test_email_intelligence_is_registered_for_dedicated_execution():
     definition = provider_definition("Email Intelligence")
     assert definition.supported is True
-    assert definition.account_discovery is True
+    assert definition.account_discovery is False
     assert definition.orchestrated is False
     assert definition.argument_mode == "email"
     assert definition.module == "email_intelligence"
@@ -38,11 +38,11 @@ async def test_email_intelligence_surfaces_profiles_breaches_and_public_accounts
                 {
                     "source": "Public Profile Network",
                     "source_url": "https://dev.to/user",
-                    "finding_type": "public_profile",
+                    "finding_type": "profile_candidate",
                     "value": "user",
                     "confidence": 0.72,
                     "severity": "info",
-                    "evidence_state": "possible_match",
+                    "evidence_state": "observed",
                     "notes": "Public Dev.to profile observed.",
                     "raw_reference": None,
                     "collected_at": None,
@@ -60,7 +60,7 @@ async def test_email_intelligence_surfaces_profiles_breaches_and_public_accounts
     assert {f["value"] for f in result.findings if f["finding_type"] == "profile_observation"} == {"github", "linkedin", "spotify"}
     assert {f["value"] for f in result.findings if f["finding_type"] == "breach"} == {"Adobe", "LinkedIn"}
     assert {f["value"] for f in result.findings if f["finding_type"] == "exposure_signal"} == {"data_breach", "credentials_leaked"}
-    assert any(f["finding_type"] == "public_profile" and f["source"] == "Public Profile Network" for f in result.findings)
+    assert any(f["finding_type"] == "profile_candidate" and f["source"] == "Public Profile Network" for f in result.findings)
 
 
 @pytest.mark.asyncio
