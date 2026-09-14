@@ -43,9 +43,6 @@ _PUBLIC_NETWORK_HOSTS = {
     "codeberg.org": ("Codeberg", "Developer"),
     "keybase.io": ("Keybase", "Identity"),
     "huggingface.co": ("Hugging Face", "AI & Developer"),
-    "npmjs.com": ("npm", "Developer"),
-    "stackoverflow.com": ("Stack Overflow", "Developer"),
-    "medium.com": ("Medium", "Publishing"),
 }
 
 
@@ -69,11 +66,10 @@ def _service_status(defn: ServiceDefinition, findings: list[dict[str, Any]]) -> 
     matches = [
         f for f in findings
         if f.get("source") == defn.provider
-        and f.get("finding_type") in {"profile_candidate", "public_identity", "profile", "public_web_reference", "profile_observation"}
+        and f.get("finding_type") in {"profile_candidate", "public_profile", "public_identity", "profile", "public_web_reference", "profile_observation"}
     ]
     if matches:
-        if any(f.get("evidence_state") == "corroborated_match" for f in matches): return "FOUND"
-        if any(f.get("evidence_state") == "source_associated" for f in matches): return "FOUND"
+        if any(f.get("evidence_state") in {"corroborated_match", "source_associated"} for f in matches): return "FOUND"
         return "POSSIBLE"
     if defn.supported and provider_status == "ok": return "NO PUBLIC EVIDENCE"
     if not defn.supported: return "UNAVAILABLE"
@@ -147,7 +143,7 @@ def _public_network_rows(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for f in findings:
-        if f.get("source") != "Public Profile Network" or f.get("finding_type") != "profile_candidate":
+        if f.get("source") != "Public Profile Network" or f.get("finding_type") != "public_profile":
             continue
         source_url = str(f.get("source_url") or "")
         host = urlparse(source_url).netloc.lower().removeprefix("www.")
@@ -167,7 +163,7 @@ def _public_network_rows(findings: list[dict[str, Any]]) -> list[dict[str, Any]]
             "discovery_methods": ["passive username profile lookup"],
             "identifier": f.get("value"),
             "confidence": float(f.get("confidence")) if f.get("confidence") is not None else None,
-            "provider_status": _provider_status(findings, "Public Profile Network") or "ok",
+            "provider_status": _provider_status(findings, "Email Intelligence") or "ok",
             "checked_at": f.get("collected_at"),
             "evidence": [{
                 "finding_id": f.get("id"),
@@ -188,7 +184,7 @@ def build_account_discovery_matrix(findings: list[dict[str, Any]]) -> list[dict[
         service_findings = [f for f in findings if f.get("source") == definition.provider]
         matches = [
             f for f in service_findings
-            if f.get("finding_type") in {"profile_candidate", "public_identity", "profile", "public_web_reference", "profile_observation"}
+            if f.get("finding_type") in {"profile_candidate", "public_profile", "public_identity", "profile", "public_web_reference", "profile_observation"}
         ]
         status = _service_status(definition, findings)
         matrix.append({
