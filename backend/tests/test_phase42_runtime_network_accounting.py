@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
+from httpx import AsyncClient
 
 from app.osint import dns
 from app.providers.base import ProviderContext, ProviderResult
@@ -12,7 +13,7 @@ from app.services.resource_budget import ResourceBudgetExceeded, ExecutionResour
 
 
 def _mock_client(handler):
-    return httpx.AsyncClient(
+    return AsyncClient(
         transport=httpx.MockTransport(handler),
         follow_redirects=False,
         trust_env=False,
