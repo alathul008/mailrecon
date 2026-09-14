@@ -6,7 +6,7 @@ from urllib.parse import quote
 import httpx
 
 from app.core.config import get_settings
-from app.osint.email import EVIDENCE_POSSIBLE
+from app.osint.email import EVIDENCE_OBSERVED
 from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.http import bounded_get, classify_exception, classify_response, parse_json, validate_provider_url
 from app.providers.network import pinned_transport
@@ -37,26 +37,6 @@ class PublicProfileNetworkProvider:
         if parse_failure:
             return parse_failure.status, None, f"{service}: {parse_failure.message}"
         return "found", data if isinstance(data, dict) else {"data": data}, None
-
-    async def _page_probe(self, service: str, url: str) -> tuple[str, dict | None, str | None]:
-        settings = get_settings()
-        validate_provider_url(url)
-        async with httpx.AsyncClient(
-            timeout=settings.request_timeout_seconds,
-            headers={"accept": "text/html,application/xhtml+xml", "user-agent": "MailRecon/1.2 passive profile discovery"},
-            follow_redirects=False,
-            trust_env=False,
-            transport=pinned_transport(url),
-        ) as client:
-            response = await bounded_get(client, url)
-        if response.status_code == 404:
-            return "not_found", None, None
-        failure = classify_response(self.name, response)
-        if failure:
-            return failure.status, None, failure.message
-        if 200 <= response.status_code < 300:
-            return "found", {"http_status": response.status_code}, None
-        return "unknown", None, f"{service}: unexpected HTTP {response.status_code}"
 
     async def _probe(self, service: str, username: str) -> tuple[str, str, str, dict | None, str | None]:
         encoded = quote(username, safe="")
@@ -103,16 +83,16 @@ class PublicProfileNetworkProvider:
                 findings.append(
                     finding(
                         self.name,
-                        "public_profile",
+                        "profile_candidate",
                         username,
                         0.72,
                         "info",
                         profile_url,
                         notes=(
-                            f"Evidence state: {EVIDENCE_POSSIBLE}. Public {service} profile observed for the derived username. "
-                            "Username reuse is not proof that the profile belongs to the target email owner."
+                            f"Evidence state: {EVIDENCE_OBSERVED}. Public {service} profile was observed for the derived username. "
+                            "The profile existence is observed; the relationship between this username and the target email remains a possible correlation."
                         ),
-                        raw_reference={"service": service, "username": username, "profile": details, "evidence_state": EVIDENCE_POSSIBLE},
+                        raw_reference={"service": service, "username": username, "profile": details, "evidence_state": EVIDENCE_OBSERVED},
                     )
                 )
             elif status in {"error", "rate_limited", "unavailable"}:
