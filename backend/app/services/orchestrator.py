@@ -9,7 +9,7 @@ from sqlalchemy import select, update, or_
 from app.db.session import SessionLocal
 from app.models import Investigation, Finding, ModuleRun, GraphNode, GraphEdge
 from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED, EVIDENCE_POSSIBLE, EVIDENCE_CORROBORATED, EVIDENCE_SOURCE_ASSOCIATED, EVIDENCE_OBSERVED
-from app.osint.dns import resolve, record_presence
+from app.osint.dns import resolve, record_presence, DKIM_SELECTORS
 from app.providers.ollama import OllamaProvider
 from app.providers.base import ProviderContext, ProviderResult, finding
 from app.providers.github import GitHubProvider
@@ -222,15 +222,28 @@ async def run_investigation(inv_id:int,token:str):
             set_module(db,inv_id,"email_validation","running",token=token);analysis=analyze_email(inv.target);execution_id,execution_attempt_id=_capture_owned_execution(db,inv_id,token);inv.normalized_email=analysis["email"];inv.username=analysis["username"];inv.domain=analysis["domain"];db.commit()
             add_findings(db,inv_id,[finding("MailRecon","email",analysis["email"],1.0,"info",notes=f"Normalized and syntax-validated target. Evidence state: {EVIDENCE_OBSERVED}.",evidence_state=EVIDENCE_OBSERVED),finding("MailRecon","classification",f"provider={analysis['provider']}; type={'Disposable' if analysis['disposable'] else 'Role-based' if analysis['role_based'] else 'Personal/Business unknown'}",.95,"info",notes=f"Classification, not an identity verdict. Evidence state: {EVIDENCE_OBSERVED}.",evidence_state=EVIDENCE_OBSERVED)],token);set_module(db,inv_id,"email_validation","completed","Validated and normalized",token)
             set_module(db,inv_id,"username_extraction","running",token=token);candidates=username_candidates(analysis["username"]);add_findings(db,inv_id,[finding("MailRecon","username_candidate",c,0.0,"info",notes=f"Evidence state: {EVIDENCE_DERIVED}. Generated from email local-part; hypothesis only, not proof of account ownership.",evidence_state=EVIDENCE_DERIVED) for c in candidates],token);set_module(db,inv_id,"username_extraction","completed",f"Generated {len(candidates)} candidates",token)
+            budget=ExecutionResourceBudget(); executable_definitions=tuple(item for item in PROVIDER_DEFINITIONS if item.factory is not None)
+            budget.validate(provider_calls=len(executable_definitions),candidate_probes=len(candidates),estimated_external_requests=_estimated_external_requests(len(executable_definitions),len(candidates))+budget.max_infrastructure_http_requests,dns_queries=8+1+len(DKIM_SELECTORS),infrastructure_http_requests=budget.max_infrastructure_http_requests)
             set_module(db,inv_id,"dns_analysis","running",token=token);dns=await resolve(inv.domain);_require_ownership(db,inv_id,token);analysis["has_dmarc"]=record_presence(dns.get("DMARC",[]),dns.get("DMARC_status"));analysis["has_spf"]=record_presence(dns.get("SPF",[]),dns.get("SPF_status"));dnssec=dns.get("DNSSEC");analysis["dnssec"]=dnssec if isinstance(dnssec,bool) else None
             fs=[]
-            for k in ["A","AAAA","MX","NS","CNAME","SPF","DMARC"]:
+            for k in ["A","AAAA","MX","NS","CNAME"]:
                 if dns.get(k):fs.append(finding("DNS",k.lower(),"; ".join(dns[k]),.99,"info",notes=f"Public DNS response. Evidence state: {EVIDENCE_OBSERVED}.",evidence_state=EVIDENCE_OBSERVED))
-            dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown";fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure.",evidence_state=EVIDENCE_OBSERVED));add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
+            spf=dns.get("SPF_analysis",{});fs.append(finding("DNS","spf_policy",json.dumps(spf,sort_keys=True,separators=(",",":")),.99 if dns.get("SPF_status")=="ok" else 0.0,"info",notes="Normalized SPF policy interpretation; operationally unavailable is not negative evidence.",evidence_state=EVIDENCE_OBSERVED))
+            dmarc=dns.get("DMARC_analysis",{});fs.append(finding("DNS","dmarc_policy",json.dumps(dmarc,sort_keys=True,separators=(",",":")),.99 if dns.get("DMARC_status")=="ok" else 0.0,"info",notes="Normalized DMARC policy interpretation; operationally unavailable is not negative evidence.",evidence_state=EVIDENCE_OBSERVED))
+            for item in dns.get("DKIM_analysis",[]):fs.append(finding("DNS","dkim_selector",json.dumps(item,sort_keys=True,separators=(",",":")),.99,"info",notes="Bounded DKIM selector observation; selector absence is not proof of missing DKIM.",evidence_state=EVIDENCE_OBSERVED))
+            dnssec_value="enabled" if analysis["dnssec"] is True else "disabled" if analysis["dnssec"] is False else "unknown";fs.append(finding("DNS","dnssec",dnssec_value,1.0 if analysis["dnssec"] is not None else 0.0,"info",notes="DNSSEC state is unknown when the resolver cannot validate it; unknown is not a security failure.",evidence_state=EVIDENCE_OBSERVED))
+            if dns.get("MX_PROVIDER"):fs.append(finding("DNS","mail_service",dns["MX_PROVIDER"],.8,"info",notes="Passive MX-based mail-service classification; provider association is not identity or ownership evidence.",evidence_state=EVIDENCE_DERIVED))
+            if dns.get("NS_PROVIDER"):fs.append(finding("DNS","nameserver_provider",dns["NS_PROVIDER"],.8,"info",notes="Passive nameserver pattern classification; shared infrastructure does not establish ownership.",evidence_state=EVIDENCE_DERIVED))
+            for item in dns.get("IP_CONTEXT",[]):
+                if not item:continue
+                if item.get("status")!="ok":
+                    fs.append(finding("IP Infrastructure","provider_status",item.get("status","error"),1.0,"warning",notes=item.get("message") or "IP infrastructure enrichment unavailable.",evidence_state=EVIDENCE_OBSERVED));continue
+                details={k:item.get(k) for k in ("asn","network","organization") if item.get(k)}
+                fs.append(finding("IP Infrastructure","ip_context",item["ip"],.8,"info",notes="Passive IP registration context: "+json.dumps(details,sort_keys=True,separators=(",",":"))+". Shared IP infrastructure is not identity confirmation.",evidence_state=EVIDENCE_OBSERVED))
+            add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS, email-authentication, mail-service and bounded IP context analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
             provider_modules=[definition.module for definition in PROVIDER_DEFINITIONS if definition.factory is not None and definition.module]
             for name in provider_modules:set_module(db,inv_id,name,"running",token=token)
             results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure)
-            executable_definitions=tuple(item for item in PROVIDER_DEFINITIONS if item.factory is not None)
             for definition,res in zip(executable_definitions,results):
                 name=definition.module or definition.name.lower().replace(" ","_")
                 if isinstance(res,Exception):set_module(db,inv_id,name,"failed",f"Provider exception: {type(res).__name__}",token);add_findings(db,inv_id,[finding(name,"provider_status","error",1.0,"warning",notes=f"Provider raised {type(res).__name__}",evidence_state=EVIDENCE_OBSERVED)],token)

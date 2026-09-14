@@ -1,0 +1,6 @@
+[[allowlists]]
+description = "Allow the known non-secret test fixture that Gitleaks classifies as a generic API key"
+condition = "AND"
+paths = ['backend/tests/test_phase37_passive_osint\.py']
+regexTarget = "line"
+regexes = ['execution_token="token"']
