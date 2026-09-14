@@ -20,11 +20,9 @@ _IMPLEMENTED_SERVICES: tuple[ServiceDefinition, ...] = tuple(
         item.name,
     )
     for item in provider_definitions(account_discovery=True)
+    if item.name != "Email Intelligence"
 )
 
-# Unsupported services remain explicit catalogue entries so the UI can state
-# that they were not checked. Implemented services are derived from the
-# canonical provider registry and cannot silently drift from provider state.
 _UNSUPPORTED_SERVICES: tuple[ServiceDefinition, ...] = (
     ServiceDefinition("Steam", "Gaming", ("public_profile_page",), False),
     ServiceDefinition("Epic Games", "Gaming", ("public_profile_page",), False),
@@ -70,6 +68,69 @@ def _service_status(defn: ServiceDefinition, findings: list[dict[str, Any]]) -> 
     return "UNKNOWN"
 
 
+def _profile_home(service: str) -> str | None:
+    hosts = {
+        "github": "https://github.com",
+        "gitlab": "https://gitlab.com",
+        "twitter": "https://x.com",
+        "x": "https://x.com",
+        "linkedin": "https://www.linkedin.com",
+        "instagram": "https://www.instagram.com",
+        "facebook": "https://www.facebook.com",
+        "reddit": "https://www.reddit.com",
+        "pinterest": "https://www.pinterest.com",
+        "flickr": "https://www.flickr.com",
+        "vimeo": "https://vimeo.com",
+        "spotify": "https://open.spotify.com",
+        "myspace": "https://myspace.com",
+        "twitch": "https://www.twitch.tv",
+        "youtube": "https://www.youtube.com",
+        "angellist": "https://wellfound.com",
+        "patreon": "https://www.patreon.com",
+        "discord": "https://discord.com",
+        "steam": "https://steamcommunity.com",
+        "medium": "https://medium.com",
+        "github gist": "https://gist.github.com",
+    }
+    return hosts.get(service.lower().strip())
+
+
+def _emailrep_rows(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    provider_status = _provider_status(findings, "Email Intelligence")
+    for f in findings:
+        if f.get("source") != "EmailRep" or f.get("finding_type") != "profile_observation":
+            continue
+        service = str(f.get("value") or "").strip()
+        key = service.casefold()
+        if not service or key in seen:
+            continue
+        seen.add(key)
+        rows.append({
+            "category": "Online Profile",
+            "service": service,
+            "status": "FOUND",
+            "supported": True,
+            "provider": "Email Intelligence",
+            "discovery_methods": ["EmailRep email-to-profile observation"],
+            "identifier": service,
+            "confidence": float(f.get("confidence")) if f.get("confidence") is not None else None,
+            "provider_status": provider_status,
+            "checked_at": f.get("collected_at"),
+            "evidence": [{
+                "finding_id": f.get("id"),
+                "finding_type": f.get("finding_type"),
+                "evidence_state": f.get("evidence_state"),
+                "confidence": f.get("confidence"),
+                "source": f.get("source"),
+                "source_url": _profile_home(service) or f.get("source_url"),
+                "notes": f.get("notes"),
+            }],
+        })
+    return rows
+
+
 def build_account_discovery_matrix(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     matrix: list[dict[str, Any]] = []
     for definition in SERVICE_CATALOG:
@@ -104,4 +165,5 @@ def build_account_discovery_matrix(findings: list[dict[str, Any]]) -> list[dict[
                 for f in matches
             ],
         })
+    matrix.extend(_emailrep_rows(findings))
     return matrix
