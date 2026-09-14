@@ -1,9 +1,61 @@
-from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from threading import Lock
+from typing import Iterator
+
+
+_current_accounting: ContextVar["ExecutionResourceAccounting | None"] = ContextVar(
+    "mailrecon_resource_accounting", default=None
+)
+
+
+@dataclass
+class ExecutionResourceAccounting:
+    """Runtime accounting shared by one execution attempt."""
+
+    budget: "ExecutionResourceBudget"
+    response_bytes: int = 0
+    infrastructure_http_requests: int = 0
+    _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
+
+    def consume_response_bytes(self, amount: int) -> None:
+        if amount < 0:
+            raise ValueError("Response byte accounting amount cannot be negative")
+        with self._lock:
+            self.response_bytes += amount
+            if self.response_bytes > self.budget.max_response_bytes:
+                raise RuntimeError("Investigation aggregate response-byte budget exceeded")
+
+    def reserve_infrastructure_http_request(self) -> None:
+        with self._lock:
+            if self.infrastructure_http_requests >= self.budget.max_infrastructure_http_requests:
+                raise RuntimeError("Investigation infrastructure HTTP budget exceeded")
+            self.infrastructure_http_requests += 1
+
+
+def current_accounting() -> ExecutionResourceAccounting | None:
+    return _current_accounting.get()
+
+
+@contextmanager
+def bind_accounting(accounting: ExecutionResourceAccounting) -> Iterator[None]:
+    token = _current_accounting.set(accounting)
+    try:
+        yield
+    finally:
+        _current_accounting.reset(token)
 
 
 @dataclass(frozen=True)
 class ExecutionResourceBudget:
-    """Central guardrails for bounded passive investigation fan-out."""
+    """Central guardrails for bounded passive investigation fan-out.
+
+    Admission limits bound planned work, provider limits bound one provider
+    result, per-response limits protect each network response, and
+    ExecutionResourceAccounting enforces aggregate runtime response bytes and
+    infrastructure requests for one execution attempt.
+    """
 
     max_provider_calls: int = 8
     max_candidate_probes: int = 4
@@ -41,15 +93,11 @@ class ExecutionResourceBudget:
         if persisted_findings > self.max_persisted_findings:
             raise RuntimeError("Investigation persisted-finding budget exceeded")
 
+    def accounting(self) -> ExecutionResourceAccounting:
+        return ExecutionResourceAccounting(self)
+
     def public_web_bounds(self) -> tuple[int, int]:
         return self.max_public_web_queries, self.max_public_web_results_per_query
 
     def note_actual_response_accounting_limit(self) -> str:
-        """Document the current boundary: HTTP bytes are hard-limited at the network layer.
-
-        ProviderResult intentionally remains backward-compatible, so byte usage is not
-        persisted or emitted as per-request telemetry. The hard limit is authoritative;
-        exact aggregate byte accounting remains an observability enhancement rather than
-        a safety prerequisite.
-        """
-        return "hard network response-byte limit; aggregate usage not persisted"
+        return "aggregate per-attempt response-byte limit enforced at outbound HTTP boundary"

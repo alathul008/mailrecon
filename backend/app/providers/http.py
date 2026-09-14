@@ -5,6 +5,7 @@ from typing import Any
 
 from app.core.security import validate_external_url
 from app.providers.base import ProviderResult
+from app.services.resource_budget import current_accounting
 
 
 MAX_EXTERNAL_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -15,18 +16,22 @@ class ResponseTooLargeError(ValueError):
 
 
 async def bounded_get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:
-    """GET an external resource without allowing an oversized body into parsing.
+    """GET an external resource with per-response and per-attempt byte bounds.
 
-    8 MiB is intentionally large enough for the current passive JSON providers
-    while keeping unexpected/chunked responses bounded before JSON/text parsing.
-    Content-Length is rejected early; streamed bodies are counted as received.
-    The small ``get`` fallback exists only for lightweight test doubles used by
-    legacy provider tests; real httpx clients always use the streaming path.
+    Content-Length is only an early rejection. Actual received bytes are counted
+    from streamed chunks. When an execution accounting context is active, those
+    actual bytes also consume the aggregate per-attempt response budget.
     """
+    accounting = current_accounting()
     if not hasattr(client, "stream"):
         response = await client.get(url, **kwargs)
-        if len(response.content) > MAX_EXTERNAL_RESPONSE_BYTES:
+        size = len(response.content)
+        if size > MAX_EXTERNAL_RESPONSE_BYTES:
+            if accounting is not None:
+                accounting.consume_response_bytes(size)
             raise ResponseTooLargeError("External response exceeded the response-size budget")
+        if accounting is not None:
+            accounting.consume_response_bytes(size)
         return response
 
     async with client.stream("GET", url, **kwargs) as response:
@@ -41,11 +46,19 @@ async def bounded_get(client: httpx.AsyncClient, url: str, **kwargs: Any) -> htt
 
         chunks: list[bytes] = []
         total = 0
-        async for chunk in response.aiter_bytes():
-            total += len(chunk)
-            if total > MAX_EXTERNAL_RESPONSE_BYTES:
-                raise ResponseTooLargeError("External response exceeded the response-size budget")
-            chunks.append(chunk)
+        try:
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                if total > MAX_EXTERNAL_RESPONSE_BYTES:
+                    if accounting is not None:
+                        accounting.consume_response_bytes(len(chunk))
+                    raise ResponseTooLargeError("External response exceeded the response-size budget")
+                if accounting is not None:
+                    accounting.consume_response_bytes(len(chunk))
+                chunks.append(chunk)
+        except Exception:
+            # Bytes already received were accounted before any parsing occurs.
+            raise
         return httpx.Response(
             status_code=response.status_code,
             headers=response.headers,

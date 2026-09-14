@@ -6,6 +6,7 @@ from sqlalchemy import and_,func,or_,select,update
 from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models import Investigation,ExecutionAttempt,ModuleRun
+from app.services.resource_budget import ExecutionResourceBudget, bind_accounting
 
 def utcnow():return datetime.now(timezone.utc)
 def _as_utc(value):
@@ -63,7 +64,10 @@ async def worker_loop(stop_event):
     settings=get_settings();active=set()
     async def execute(inv_id,token):
         from app.services.orchestrator import run_investigation
-        await run_investigation(inv_id,token)
+        budget=ExecutionResourceBudget()
+        accounting=budget.accounting()
+        with bind_accounting(accounting):
+            await run_investigation(inv_id,token)
     while not stop_event.is_set():
         with SessionLocal() as db:
             recover_stale_investigations(db);available=max(0,settings.max_concurrency-len(active));candidates=_queued_ids(db,available) if available else [];claimed=[]
