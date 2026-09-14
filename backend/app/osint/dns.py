@@ -213,13 +213,20 @@ async def resolve(domain: str) -> dict:
             dkim.extend([f"{selector}: {value}" for value in values if value.lower().startswith("v=dkim1")])
         dkim_statuses.append(status)
     out["DKIM"] = dkim
-    out["DKIM_status"] = "ok" if dkim else ("unavailable" if "unavailable" in dkim_statuses or "error" in dkim_statuses else "no_result")
+    if dkim:
+        out["DKIM_status"] = "ok"
+    elif "resource_limited" in dkim_statuses:
+        out["DKIM_status"] = "resource_limited"
+    elif "unavailable" in dkim_statuses or "error" in dkim_statuses:
+        out["DKIM_status"] = "unavailable"
+    else:
+        out["DKIM_status"] = "no_result"
     out["DKIM_analysis"] = _parse_dkim(dkim)
 
     if statuses["DS"] == "ok" and out["DS"]:
         out["DNSSEC"] = True
         out["DNSSEC_status"] = "ok"
-    elif statuses["DS"] in {"unavailable", "error"}:
+    elif statuses["DS"] in {"unavailable", "error", "resource_limited"}:
         out["DNSSEC"] = None
         out["DNSSEC_status"] = statuses["DS"]
     else:
