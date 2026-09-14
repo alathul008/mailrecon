@@ -94,6 +94,15 @@ export type AccountDiscovery = {
   domain: string | null;
   execution_id: string | null;
   execution_attempt_id: string | null;
+  summary: {
+    services_checked: number;
+    accounts_found: number;
+    possible_accounts: number;
+    unknown_accounts: number;
+    emailrep_profiles: number;
+    breaches_found: number;
+    exposure_signals: string[];
+  };
   provider_execution_status: Array<{
     provider: string;
     status: string;
