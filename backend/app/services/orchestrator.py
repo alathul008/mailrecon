@@ -12,6 +12,7 @@ from app.osint.email import analyze_email, username_candidates, EVIDENCE_DERIVED
 from app.osint.dns import resolve, record_presence, DKIM_SELECTORS
 from app.providers.ollama import OllamaProvider
 from app.providers.base import ProviderContext, ProviderResult, finding
+from app.providers.email_intelligence import EmailIntelligenceProvider
 from app.providers.github import GitHubProvider
 from app.providers.gitlab import GitLabProvider
 from app.providers.gravatar import GravatarProvider
@@ -25,7 +26,7 @@ from app.services.resource_budget import ExecutionResourceBudget
 
 logger = logging.getLogger("mailrecon.execution")
 PROVIDER_DEFINITIONS = provider_definitions(orchestrated=True)
-MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","gitlab","public_web","breach_sources","risk_calculation","graph_build"]
+MODULES=["email_validation","domain_analysis","dns_analysis","gravatar","rdap","username_extraction","public_profile_discovery","gitlab","public_web","breach_sources","email_intelligence","risk_calculation","graph_build"]
 DERIVED_USERNAME_RELATION = "derived_username"
 MODULE_TRANSITIONS = {"queued": {"queued", "running", "completed", "skipped", "abandoned"}, "running": {"running", "completed", "failed", "skipped", "abandoned"}, "completed": {"completed"}, "failed": {"failed"}, "skipped": {"skipped"}, "abandoned": {"abandoned"}}
 PROVIDER_FACTORY_RESOLVERS = {
@@ -243,11 +244,18 @@ async def run_investigation(inv_id:int,token:str):
             add_findings(db,inv_id,fs,token);set_module(db,inv_id,"dns_analysis","completed","DNS, email-authentication, mail-service and bounded IP context analysis complete",token);set_module(db,inv_id,"domain_analysis","completed","Domain metadata derived from DNS/RDAP",token)
             provider_modules=[definition.module for definition in PROVIDER_DEFINITIONS if definition.factory is not None and definition.module]
             for name in provider_modules:set_module(db,inv_id,name,"running",token=token)
-            results=await run_providers(analysis["email"],analysis["domain"],candidates,inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure)
+            results=await run_providers(analysis["email"],analysis["domain"],candidates[:3],inv_id=inv_id,token=token,allow_external=inv.external_provider_disclosure)
             for definition,res in zip(executable_definitions,results):
                 name=definition.module or definition.name.lower().replace(" ","_")
                 if isinstance(res,Exception):set_module(db,inv_id,name,"failed",f"Provider exception: {type(res).__name__}",token);add_findings(db,inv_id,[finding(name,"provider_status","error",1.0,"warning",notes=f"Provider raised {type(res).__name__}",evidence_state=EVIDENCE_OBSERVED)],token)
                 else:add_findings(db,inv_id,[provider_finding(res),*res.findings],token);set_module(db,inv_id,name,"completed" if res.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",res.message,token)
+            set_module(db,inv_id,"email_intelligence","running",token=token)
+            if inv.external_provider_disclosure:
+                email_intelligence_result=await EmailIntelligenceProvider().run(ProviderContext(email=analysis["email"],domain=analysis["domain"],candidates=tuple(candidates[:3])))
+            else:
+                email_intelligence_result=ProviderResult("Email Intelligence","disabled",message="External provider disclosure disabled for this investigation")
+            add_findings(db,inv_id,[provider_finding(email_intelligence_result),*email_intelligence_result.findings],token)
+            set_module(db,inv_id,"email_intelligence","completed" if email_intelligence_result.status in {"ok","unconfigured","rate_limited","unavailable","disabled"} else "failed",email_intelligence_result.message,token)
             rdap_index=next((index for index,item in enumerate(executable_definitions) if item.name=="RDAP"),None)
             consistency=_rdap_domain_consistency(analysis["domain"],results[rdap_index]) if rdap_index is not None else None
             if consistency:add_findings(db,inv_id,[consistency],token)
