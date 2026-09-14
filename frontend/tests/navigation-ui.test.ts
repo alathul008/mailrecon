@@ -96,7 +96,7 @@ describe('Phase 28 navigation and workflow integrity', () => {
 
   it('makes dashboard investigations actionable and exposes retry on load failure', async () => {
     const api = await import('../src/services/api');
-    vi.mocked(api.listInvestigations).mockResolvedValue([{ id: 7, target: 'alpha@example.com', status: 'completed', risk_score: 80, risk_level: 'HIGH', created_at: '2026-01-01T00:00:00Z' }]);
+    vi.mocked(api.listInvestigations).mockResolvedValue([{ id: 7, target: 'alpha@example.com', status: 'completed', risk_score: 80, risk_level: 'HIGH', created_at: '2026-01-01T00:00:00Z', external_provider_disclosure: false }]);
     const { Dashboard } = await import('../src/pages/Dashboard');
     const r = await import('react') as any;
     const onOpen = vi.fn();

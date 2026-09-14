@@ -27,6 +27,12 @@ def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
 SessionLocal = sessionmaker(engine, expire_on_commit=False, class_=Session)
 
 
+def validate_finding_execution_provenance(finding) -> None:
+    """Reject execution-derived findings that have no durable attempt identity."""
+    if finding.execution_id and not finding.execution_attempt_id:
+        raise RuntimeError("Execution-derived Finding requires execution-attempt provenance")
+
+
 def _finding_identity(finding) -> tuple:
     if finding.persistence_key:
         return ("persistence", finding.persistence_key)
@@ -42,27 +48,31 @@ def _finding_identity(finding) -> tuple:
 
 @event.listens_for(Session, "before_flush")
 def _enforce_persisted_finding_budget(session, flush_context, instances):
-    """Enforce the per-attempt persisted-finding limit at the real flush boundary.
+    """Enforce persisted-finding limits and production provenance at flush time.
 
-    The execution-attempt row is updated before the count is read.  That update
+    The execution-attempt row is updated before the count is read. That update
     is the database serialization point: SQLite acquires its write transaction
     lock, while databases with row-level locking serialize concurrent writers on
-    the same attempt row.  A Python lock cannot provide this guarantee because
+    the same attempt row. A Python lock cannot provide this guarantee because
     separate workers/processes and separate database connections do not share it.
 
     Historical attempts are independent budgets. Duplicate identities already
     persisted or duplicated in the same flush consume no additional budget.
 
-    Some isolated repository fixtures intentionally persist projection-only
-    Finding rows with synthetic attempt identifiers and without materializing an
-    ExecutionAttempt row.  Those rows predate the runtime budget contract and
-    are not runtime budget operations.  The production SessionLocal engine has
-    foreign-key enforcement enabled, so real Finding persistence with an
-    execution_attempt_id still requires a real ExecutionAttempt at the database
-    boundary; only the budget hook is skipped when an external fixture uses a
-    database without that foreign-key enforcement.
+    Production-generated execution findings must carry an execution attempt
+    whenever they carry an execution identity. The production SessionLocal
+    engine also enforces the composite Finding -> ExecutionAttempt foreign key,
+    so a non-null attempt identifier must resolve to a durable attempt row.
+    Legacy/demo rows without execution provenance remain compatible, as do
+    isolated projection fixtures that intentionally use a separate SQLite engine
+    with synthetic attempt identifiers.
     """
     from app.models import ExecutionAttempt, Finding
+
+    if session.bind is engine:
+        for finding in session.new:
+            if isinstance(finding, Finding):
+                validate_finding_execution_provenance(finding)
 
     pending = [obj for obj in session.new if isinstance(obj, Finding) and obj.execution_attempt_id]
     if not pending:
@@ -92,12 +102,12 @@ def _enforce_persisted_finding_budget(session, flush_context, instances):
             ) from exc
 
         # Finding.execution_attempt_id is a nullable, composite FK to the
-        # durable ExecutionAttempt identity.  The production engine enforces
-        # that FK, so a real add_findings() persistence operation cannot commit
-        # an orphan.  A few legacy/projection fixtures deliberately use
-        # synthetic attempt ids on an engine without FK enforcement; there is no
-        # durable attempt whose budget can be enforced for those rows, so leave
-        # those pre-existing fixture semantics untouched.
+        # durable ExecutionAttempt identity. The production engine enforces that
+        # FK, so a real Finding persistence operation cannot commit an orphan.
+        # A few legacy/projection fixtures deliberately use synthetic attempt ids
+        # on an engine without FK enforcement; there is no durable attempt whose
+        # budget can be enforced for those rows, so leave those fixture semantics
+        # untouched.
         if locked.rowcount != 1:
             continue
 

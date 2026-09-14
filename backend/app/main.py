@@ -10,6 +10,7 @@ from app.api.account_discovery import router as account_discovery_router
 from app.api.public_web import router as public_web_router
 from app.api.execution import router as execution_router
 from app.api.history import router as history_router
+from app.api.response_contracts import install_response_contracts
 from app.services.lifecycle import worker_loop
 from app.services.schema import ensure_schema
 import asyncio
@@ -40,6 +41,7 @@ app.include_router(account_discovery_router)
 app.include_router(public_web_router)
 app.include_router(execution_router)
 app.include_router(history_router)
+install_response_contracts(app.routes)
 if os.path.isdir("/app/frontend/dist"):
     app.mount("/",StaticFiles(directory="/app/frontend/dist",html=True),name="frontend")
 
@@ -51,5 +53,5 @@ async def security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    response.headers["Content-Security-Policy"] = f"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; connect-src 'self' {settings.csp_connect_src}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     return response

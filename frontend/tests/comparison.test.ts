@@ -4,7 +4,7 @@ import type { Finding, Investigation } from '../src/types';
 
 const finding = (overrides: Partial<Finding> = {}): Finding => ({ id: 1, source: 'DNS', finding_type: 'mx', value: 'mail.example.com', confidence: 1, severity: 'info', collected_at: '2026-01-01T00:00:00Z', ...overrides });
 
-const investigation = (findings: Finding[]): Investigation => ({ id: 1, target: 'a@example.com', username: 'a', domain: 'example.com', status: 'completed', risk_score: 20, risk_level: 'LOW', created_at: '2026-01-01T00:00:00Z', modules: [], findings });
+const investigation = (findings: Finding[]): Investigation => ({ id: 1, target: 'a@example.com', username: 'a', domain: 'example.com', status: 'completed', risk_score: 20, risk_level: 'LOW', privacy_mode: false, external_provider_disclosure: false, created_at: '2026-01-01T00:00:00Z', modules: [], findings });
 
 describe('investigation comparison', () => {
   it('classifies added, removed, changed and unchanged evidence deterministically', () => {
