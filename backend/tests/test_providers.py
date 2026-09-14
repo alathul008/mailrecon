@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 from app.db.session import Base
 from app.models import Finding, Investigation
 from app.providers.base import ProviderContext, ProviderResult
+from app.providers.email_intelligence import EmailIntelligenceProvider
 from app.providers.github import GitHubProvider
 from app.providers.gravatar import GravatarProvider
 from app.providers.hibp import HIBPProvider
 from app.providers.rdap import RDAPProvider
 from app.providers.ollama import OllamaProvider, validate_ollama_url
+from app.providers import email_intelligence as email_intelligence_module
 from app.providers import github as github_module
 from app.providers import gravatar as gravatar_module
 from app.providers import hibp as hibp_module
@@ -98,6 +100,28 @@ async def test_hibp_incomplete_and_malformed_records_are_not_findings(monkeypatc
     try: patch_client(monkeypatch,[hibp_module],json_data=[{},"bad",{"Name":"Valid","BreachDate":"not-a-date"}]); result=await HIBPProvider().run(context())
     finally: settings.hibp_api_key=original
     assert result.status=="ok"; assert [f["value"] for f in result.findings]==["Valid"]; assert result.findings[0]["first_seen"] is None
+
+@pytest.mark.asyncio
+async def test_email_intelligence_surfaces_profiles_and_breaches(monkeypatch):
+    async def fake_get_json(self,url,headers):
+        if "emailrep.io" in url:
+            return {"reputation":"high","details":{"profiles":["github","linkedin","spotify"],"data_breach":True,"credentials_leaked":True}}, None
+        return {"status":"success","breaches":[["Adobe","LinkedIn"]]}, None
+    monkeypatch.setattr(EmailIntelligenceProvider,"_get_json",fake_get_json)
+    result=await EmailIntelligenceProvider().run(context())
+    assert result.status=="ok"
+    assert {f["value"] for f in result.findings if f["finding_type"]=="profile_observation"}=={"github","linkedin","spotify"}
+    assert {f["value"] for f in result.findings if f["finding_type"]=="breach"}=={"Adobe","LinkedIn"}
+    assert {f["value"] for f in result.findings if f["finding_type"]=="exposure_signal"}=={"data_breach","credentials_leaked"}
+
+@pytest.mark.asyncio
+async def test_email_intelligence_source_failure_is_unavailable(monkeypatch):
+    async def failed_get_json(self,url,headers): return None, ProviderResult("Email Intelligence","unavailable",message="offline")
+    monkeypatch.setattr(EmailIntelligenceProvider,"_get_json",failed_get_json)
+    result=await EmailIntelligenceProvider().run(context())
+    assert result.status=="unavailable"
+    assert result.findings==[]
+
 @pytest.mark.asyncio
 async def test_github_success_and_404_no_result(monkeypatch):
     patch_client(monkeypatch,[github_module],json_data={"login":"example","name":"Example","html_url":"https://github.com/example","public_repos":3}); result=await GitHubProvider().run(context(candidates=("example",))); assert result.status=="ok"; assert len(result.findings)==1; patch_client(monkeypatch,[github_module],status=404,json_data={}); result=await GitHubProvider().run(context(candidates=("missing",))); assert result.status=="ok"; assert result.findings==[]
@@ -118,8 +142,8 @@ async def test_provider_execution_isolated_when_one_raises(monkeypatch):
     async def ok_provider(self,context): return ProviderResult(self.name,"ok",message="done")
     async def broken_rdap(self,context): raise RuntimeError("boom")
     async def unconfigured_provider(self,context): return ProviderResult(self.name,"unconfigured")
-    monkeypatch.setattr(orchestrator.GravatarProvider,"run",ok_provider); monkeypatch.setattr(orchestrator.RDAPProvider,"run",broken_rdap); monkeypatch.setattr(orchestrator.GitHubProvider,"run",ok_provider); monkeypatch.setattr(orchestrator.GitLabProvider,"run",ok_provider); monkeypatch.setattr(orchestrator.HIBPProvider,"run",unconfigured_provider); monkeypatch.setattr(orchestrator.PublicWebProvider,"run",unconfigured_provider)
-    results=await orchestrator.run_providers("user@example.com","example.com",["example"]); assert [result.status if not isinstance(result,Exception) else type(result).__name__ for result in results]==["ok","RuntimeError","ok","ok","unconfigured","unconfigured"]
+    monkeypatch.setattr(orchestrator.GravatarProvider,"run",ok_provider); monkeypatch.setattr(orchestrator.RDAPProvider,"run",broken_rdap); monkeypatch.setattr(orchestrator.GitHubProvider,"run",ok_provider); monkeypatch.setattr(orchestrator.GitLabProvider,"run",ok_provider); monkeypatch.setattr(orchestrator.HIBPProvider,"run",unconfigured_provider); monkeypatch.setattr(orchestrator.EmailIntelligenceProvider,"run",unconfigured_provider); monkeypatch.setattr(orchestrator.PublicWebProvider,"run",unconfigured_provider)
+    results=await orchestrator.run_providers("user@example.com","example.com",["example"]); assert [result.status if not isinstance(result,Exception) else type(result).__name__ for result in results]==["ok","RuntimeError","ok","ok","unconfigured","unconfigured","unconfigured"]
 
 def test_privacy_mode_strips_provider_raw_reference():
     engine=create_engine("sqlite:///:memory:"); Base.metadata.create_all(engine)
