@@ -13,11 +13,18 @@ class GravatarProvider:
 
     async def run(self, context: ProviderContext) -> ProviderResult:
         settings = get_settings()
-        h = hashlib.md5(context.email.strip().lower().encode()).hexdigest()
-        url = f"https://www.gravatar.com/{h}.json"
+        # Current Gravatar profile identifiers use SHA-256 of the normalized email.
+        h = hashlib.sha256(context.email.strip().lower().encode()).hexdigest()
+        url = f"https://gravatar.com/{h}.json"
         try:
             validate_provider_url(url)
-            async with httpx.AsyncClient(timeout=settings.request_timeout_seconds, follow_redirects=False, trust_env=False, transport=pinned_transport(url)) as client:
+            async with httpx.AsyncClient(
+                timeout=settings.request_timeout_seconds,
+                headers={"accept": "application/json", "user-agent": "MailRecon/1.2"},
+                follow_redirects=False,
+                trust_env=False,
+                transport=pinned_transport(url),
+            ) as client:
                 response = await bounded_get(client, url)
             if response.status_code == 404:
                 return ProviderResult(self.name, "ok", message="No public Gravatar profile")
