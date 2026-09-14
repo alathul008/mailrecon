@@ -1,15 +1,18 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import Lock
+from typing import Iterator
+
+
+_current_accounting: ContextVar["ExecutionResourceAccounting | None"] = ContextVar(
+    "mailrecon_resource_accounting", default=None
+)
 
 
 @dataclass
 class ExecutionResourceAccounting:
-    """Runtime accounting shared by one execution attempt.
-
-    Admission limits describe planned work; this object accounts actual runtime
-    consumption. It is intentionally in-memory because the current deployment
-    is a single-user/local service and no persistent counter is required.
-    """
+    """Runtime accounting shared by one execution attempt."""
 
     budget: "ExecutionResourceBudget"
     response_bytes: int = 0
@@ -31,21 +34,32 @@ class ExecutionResourceAccounting:
             self.infrastructure_http_requests += 1
 
 
+def current_accounting() -> ExecutionResourceAccounting | None:
+    return _current_accounting.get()
+
+
+@contextmanager
+def bind_accounting(accounting: ExecutionResourceAccounting) -> Iterator[None]:
+    token = _current_accounting.set(accounting)
+    try:
+        yield
+    finally:
+        _current_accounting.reset(token)
+
+
 @dataclass(frozen=True)
 class ExecutionResourceBudget:
     """Central guardrails for bounded passive investigation fan-out.
 
-    Dimensions are intentionally distinct: admission limits bound planned work,
-    provider limits bound one provider result, per-response limits protect each
-    network response, and ExecutionResourceAccounting enforces aggregate runtime
-    response bytes and infrastructure requests for one execution attempt.
+    Admission limits bound planned work, provider limits bound one provider
+    result, per-response limits protect each network response, and
+    ExecutionResourceAccounting enforces aggregate runtime response bytes and
+    infrastructure requests for one execution attempt.
     """
 
     max_provider_calls: int = 8
     max_candidate_probes: int = 4
     max_external_requests: int = 32
-    # Aggregate bytes per execution attempt. bounded_get also enforces this
-    # value as the per-response hard ceiling.
     max_response_bytes: int = 8 * 1024 * 1024
     max_dns_queries: int = 15
     max_infrastructure_http_requests: int = 2
@@ -86,5 +100,4 @@ class ExecutionResourceBudget:
         return self.max_public_web_queries, self.max_public_web_results_per_query
 
     def note_actual_response_accounting_limit(self) -> str:
-        """Describe the runtime aggregate response-byte invariant."""
         return "aggregate per-attempt response-byte limit enforced at outbound HTTP boundary"
