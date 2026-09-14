@@ -8,7 +8,7 @@ from app.providers.registry import provider_definition
 def test_email_intelligence_is_registered_for_dedicated_execution():
     definition = provider_definition("Email Intelligence")
     assert definition.supported is True
-    assert definition.account_discovery is True
+    assert definition.account_discovery is False
     assert definition.orchestrated is False
     assert definition.argument_mode == "email"
     assert definition.module == "email_intelligence"
