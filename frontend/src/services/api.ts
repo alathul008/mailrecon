@@ -57,6 +57,10 @@ export type CorrelationResult = {
   relationships: CorrelationRelationship[];
   conflicts: CorrelationConflict[];
   semantics: Record<string, string>;
+  investigation_id: number;
+  execution_id: string | null;
+  execution_attempt_id: string | null;
+  provenance: Record<string, string | null>;
 };
 
 export type AccountDiscoveryEvidence = {
@@ -88,11 +92,16 @@ export type AccountDiscovery = {
   normalized_email: string | null;
   username: string | null;
   domain: string | null;
+  execution_id: string | null;
+  execution_attempt_id: string | null;
   provider_execution_status: Array<{
     provider: string;
     status: string;
     checked_at: string | null;
     message: string | null;
+    finding_id: number;
+    execution_id: string | null;
+    execution_attempt_id: string | null;
   }>;
   semantics: Record<string, string>;
   services: AccountDiscoveryService[];
@@ -202,7 +211,11 @@ export function createInvestigation(
   privacy_mode = false,
   external_provider_disclosure = true,
 ) {
-  return request<{ id: number; status: string }>('/investigations', {
+  return request<{
+    id: number;
+    status: string;
+    external_provider_disclosure: boolean;
+  }>('/investigations', {
     method: 'POST',
     body: JSON.stringify({ email, privacy_mode, external_provider_disclosure }),
   });
@@ -227,6 +240,7 @@ export function listInvestigations() {
       risk_score: number | null;
       risk_level: string | null;
       created_at: string;
+      external_provider_disclosure: boolean;
     }>
   >('/investigations');
 }
