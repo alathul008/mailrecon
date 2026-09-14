@@ -215,6 +215,7 @@ class AccountDiscoveryEvidenceOut(BaseModel):
     source: str | None
     source_url: str | None
     notes: str | None
+    collected_at: datetime | None
 
 
 class AccountDiscoveryServiceOut(BaseModel):
